@@ -34,7 +34,7 @@ export default function LoginPage() {
     <div className="login-page">
       <div className="login-card">
         <div className="logo-icon">🛡️</div>
-        <h1>AntiCheat Quiz</h1>
+        <h1>secureVision</h1>
         <p>Secure examination platform for institutions. Sign in to access your professor dashboard.</p>
 
         {error && (

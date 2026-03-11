@@ -1,7 +1,7 @@
 {
-  "name": "anticheat-backend",
+  "name": "securevision-backend",
   "version": "1.0.0",
-  "description": "AntiCheat Quiz Platform Backend",
+  "description": "secureVision Platform Backend",
   "main": "dist/index.js",
   "scripts": {
     "dev": "ts-node-dev --respawn --transpile-only src/index.ts",

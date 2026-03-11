@@ -74,7 +74,7 @@ router.get('/:id', requireAuth, async (req: AuthRequest, res: Response) => {
   // Students only get safe fields (no answer keys)
   if (req.user?.role === 'STUDENT') {
     const { configJson, ...safeExam } = exam;
-    const config = configJson as Record<string, unknown>;
+    const config = (configJson as unknown) as Record<string, unknown>;
     const safeConfig = {
       ...config,
       questions: (config.questions as Array<Record<string, unknown>>)?.map((q) => {
@@ -124,6 +124,38 @@ router.delete(
     }
     await prisma.exam.delete({ where: { id: req.params.id } });
     res.json({ message: 'Exam deleted' });
+  });
+
+// PUT /api/exams/:id/questions — update questions list (professor only)
+router.put(
+  '/:id/questions',
+  requireAuth,
+  requireRole('PROFESSOR'),
+  async (req: AuthRequest, res: Response) => {
+    const exam = await prisma.exam.findUnique({ where: { id: req.params.id } });
+    if (!exam || exam.ownerId !== req.user!.id) {
+      res.status(404).json({ error: 'Exam not found' });
+      return;
+    }
+    const questions = req.body.questions;
+    if (!Array.isArray(questions)) {
+      res.status(400).json({ error: 'questions must be an array' });
+      return;
+    }
+    // Parse existing config and update only the questions field
+    let config: Record<string, unknown> = {};
+    try {
+      config = JSON.parse(exam.configJson as string) as Record<string, unknown>;
+    } catch {
+      config = { policy: { lowSeverityAction: 'warn', mediumSeverityAction: 'pause', highSeverityAction: 'submit' } };
+    }
+    config.questions = questions;
+    config.totalPoints = questions.reduce((sum: number, q: Record<string, unknown>) => sum + ((q.points as number) || 0), 0);
+    const updated = await prisma.exam.update({
+      where: { id: req.params.id },
+      data: { configJson: JSON.stringify(config) },
+    });
+    res.json({ exam: updated, questionCount: questions.length });
   }
 );
 

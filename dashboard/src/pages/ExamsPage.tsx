@@ -128,6 +128,9 @@ export default function ExamsPage() {
                       </td>
                       <td>
                         <div style={{ display: 'flex', gap: 8 }}>
+                          <button className="btn btn-outline btn-sm" onClick={() => navigate(`/exams/${exam.id}/questions`)}>
+                              📝 Questions
+                            </button>
                           {exam.isActive && (
                             <button className="btn btn-outline btn-sm" onClick={() => navigate(`/monitor/${exam.id}`)}>
                               📡 Monitor

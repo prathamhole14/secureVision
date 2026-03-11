@@ -62,7 +62,7 @@ app.use(
 
 const PORT = parseInt(process.env.PORT || '3001', 10);
 httpServer.listen(PORT, () => {
-  logger.info(`🚀 AntiCheat Backend running at http://localhost:${PORT}`);
+  logger.info(`🔒 secureVision Backend running at http://localhost:${PORT}`);
 });
 
 export default app;

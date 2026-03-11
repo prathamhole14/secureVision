@@ -19,7 +19,7 @@ export default function DashboardLayout() {
     <div className="app-layout">
       <aside className="sidebar">
         <div className="sidebar-logo">
-          <h2>🛡️ AntiCheat Quiz</h2>
+          <h2>🔒 secureVision</h2>
           <div style={{ fontSize: '0.75rem', color: 'var(--text-muted)', marginTop: 4 }}>
             Professor Dashboard
           </div>
