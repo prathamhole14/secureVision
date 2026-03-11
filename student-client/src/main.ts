@@ -1,7 +1,8 @@
-const electron = require('electron');
-const path = require('path');
-const { spawn } = require('child_process');
-const net = require('net');
+// @ts-ignore
+const { app, BrowserWindow, ipcMain, shell } = require('electron');
+import * as path from 'path';
+import { spawn, ChildProcess } from 'child_process';
+import * as net from 'net';
 
 let mainWindow: any = null;
 let daemonProcess: any = null;
@@ -42,9 +43,18 @@ function connectToDaemon() {
   daemonSocket.on('error', (err: any) => {
     if (process.env.NODE_ENV !== 'production' && err.code === 'ENOENT') {
       // Suppress missing daemon socket spam in dev mode
-      return;
+      // This is expected if the daemon isn't running yet or failed to start
+      // We still want to attempt reconnecting with backoff.
+    } else {
+      console.warn('[Daemon] Socket error:', err.message);
     }
-    console.warn('[Daemon] Socket error:', err.message);
+    // Attempt reconnect with exponential backoff on any error
+    if (process.env.NODE_ENV === 'production' || reconnectDelay < 10000) {
+      console.log(`[Daemon] Socket error, attempting reconnect in ${reconnectDelay}ms...`);
+    }
+    mainWindow?.webContents.send('daemon:status', { connected: false });
+    setTimeout(connectToDaemon, reconnectDelay);
+    reconnectDelay = Math.min(reconnectDelay * 1.5, 30000); // Exponential backoff up to 30s
   });
 }
 
@@ -85,7 +95,7 @@ function sendToDaemon(message: object) {
 
 // --- Electron Window ---
 function createWindow() {
-  mainWindow = new electron.BrowserWindow({
+  mainWindow = new BrowserWindow({
     width: 1280,
     height: 800,
     // Kiosk mode in production:
@@ -107,7 +117,7 @@ function createWindow() {
 
   // Prevent new windows from opening
   mainWindow?.webContents.setWindowOpenHandler(({ url }: { url: string }) => {
-    electron.shell.openExternal(url);
+    shell.openExternal(url);
     return { action: 'deny' };
   });
 
@@ -128,25 +138,25 @@ function createWindow() {
 }
 
 // --- IPC Handlers ---
-electron.ipcMain.handle('daemon:start-protection', async (_event: any, sessionKey: string) => {
+ipcMain.handle('daemon:start-protection', async (_event: any, sessionKey: string) => {
   sendToDaemon({ command: 'start_protection', sessionKey });
   return { ok: true };
 });
 
-electron.ipcMain.handle('daemon:stop-protection', async () => {
+ipcMain.handle('daemon:stop-protection', async () => {
   sendToDaemon({ command: 'stop_protection' });
   return { ok: true };
 });
 
-electron.ipcMain.handle('daemon:get-status', async () => {
+ipcMain.handle('daemon:get-status', async () => {
   sendToDaemon({ command: 'get_status' });
   return { ok: true };
 });
 
-electron.ipcMain.handle('app:get-backend-url', () => BACKEND_URL);
+ipcMain.handle('app:get-backend-url', () => BACKEND_URL);
 
 // Soft JS-level blur detection reported to daemon bridge
-electron.ipcMain.on('renderer:focus-event', (_event: any, data: any) => {
+ipcMain.on('renderer:focus-event', (_event: any, data: any) => {
   mainWindow?.webContents.send('daemon:event', {
     type: data.type === 'blur' ? 'focus_loss' : 'focus_regained',
     severity: 'LOW',
@@ -156,27 +166,27 @@ electron.ipcMain.on('renderer:focus-event', (_event: any, data: any) => {
 });
 
 // --- App lifecycle ---
-electron.app.whenReady().then(() => {
+app.whenReady().then(() => {
   // In dev mode, allow loading cross-origin resources (backend socket.io.js etc.)
   if (process.env.NODE_ENV !== 'production') {
-    electron.app.commandLine.appendSwitch('disable-features', 'OutOfBlinkCors');
+    app.commandLine.appendSwitch('disable-features', 'OutOfBlinkCors');
   }
 
   createWindow();
   launchDaemon();
 
-  electron.app.on('activate', () => {
-    if (electron.BrowserWindow.getAllWindows().length === 0) createWindow();
+  app.on('activate', () => {
+    if (BrowserWindow.getAllWindows().length === 0) createWindow();
   });
 });
 
-electron.app.on('window-all-closed', () => {
+app.on('window-all-closed', () => {
   sendToDaemon({ command: 'stop_protection' });
   daemonProcess?.kill();
-  if (process.platform !== 'darwin') electron.app.quit();
+  if (process.platform !== 'darwin') app.quit();
 });
 
 // Prevent multiple instances
-if (!electron.app.requestSingleInstanceLock()) {
-  electron.app.quit();
+if (!app.requestSingleInstanceLock()) {
+  app.quit();
 }
