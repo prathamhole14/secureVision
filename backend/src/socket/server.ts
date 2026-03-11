@@ -9,7 +9,17 @@ let io: Server | null = null;
 export function initSocketIO(httpServer: HttpServer) {
   io = new Server(httpServer, {
     cors: {
-      origin: (process.env.ALLOWED_ORIGINS || '').split(','),
+      origin: (origin, callback) => {
+        // Allow requests with no origin (Electron file:// context)
+        if (!origin) return callback(null, true);
+        // Allow any localhost in dev
+        if (origin.startsWith('http://localhost') || origin.startsWith('http://127.0.0.1')) {
+          return callback(null, true);
+        }
+        const allowed = (process.env.ALLOWED_ORIGINS || '').split(',').map(o => o.trim());
+        if (allowed.includes(origin)) return callback(null, true);
+        callback(new Error(`Socket.IO CORS: ${origin} not allowed`));
+      },
       methods: ['GET', 'POST'],
       credentials: true,
     },

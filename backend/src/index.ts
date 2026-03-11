@@ -22,11 +22,37 @@ const httpServer = createServer(app);
 // Initialize Socket.IO
 initSocketIO(httpServer);
 
+// Parse allowed origins — always include Electron (file://) and common dev ports
+const rawOrigins = (process.env.ALLOWED_ORIGINS || '').split(',').map((o) => o.trim()).filter(Boolean);
+const allowedOrigins = [
+  ...rawOrigins,
+  'http://localhost:5173',
+  'http://localhost:5174',
+  'http://localhost:3000',
+];
+
 // Core Middleware
-app.use(helmet());
+app.use(
+  helmet({
+    // Allow Electron / cross-origin clients to load backend resources (e.g. socket.io.js)
+    crossOriginResourcePolicy: { policy: 'cross-origin' },
+    crossOriginOpenerPolicy: false,
+    crossOriginEmbedderPolicy: false,
+    contentSecurityPolicy: false, // CSP is handled by the Electron renderer
+  })
+);
 app.use(
   cors({
-    origin: (process.env.ALLOWED_ORIGINS || '').split(','),
+    origin: (origin, callback) => {
+      // Allow requests with no origin (Electron, curl, mobile apps)
+      if (!origin) return callback(null, true);
+      if (allowedOrigins.includes(origin)) return callback(null, true);
+      // Allow any localhost port in development
+      if (process.env.NODE_ENV !== 'production' && origin.startsWith('http://localhost')) {
+        return callback(null, true);
+      }
+      callback(new Error(`CORS policy: origin ${origin} is not allowed`));
+    },
     credentials: true,
   })
 );

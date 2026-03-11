@@ -23,10 +23,10 @@ var __toESM = (mod, isNodeMode, target) => (target = mod != null ? __create(__ge
 ));
 
 // src/main.ts
+var import_electron = require("electron");
 var path = __toESM(require("path"));
 var import_child_process = require("child_process");
 var net = __toESM(require("net"));
-var { app, BrowserWindow, ipcMain, shell } = require("electron");
 var mainWindow = null;
 var daemonProcess = null;
 var daemonSocket = null;
@@ -83,7 +83,7 @@ function sendToDaemon(message) {
   }
 }
 function createWindow() {
-  mainWindow = new BrowserWindow({
+  mainWindow = new import_electron.BrowserWindow({
     width: 1280,
     height: 800,
     // Kiosk mode in production:
@@ -98,15 +98,16 @@ function createWindow() {
       // Security: isolate renderer from Node.js
       nodeIntegration: false,
       // Security: no Node.js in renderer
-      sandbox: true,
-      // Security: sandbox renderer
-      devTools: process.env.NODE_ENV !== "production",
-      webSecurity: true,
+      sandbox: false,
+      // Disable sandbox so preload can use contextBridge
+      devTools: true,
+      webSecurity: process.env.NODE_ENV === "production",
+      // Relax in dev for cross-origin backend resources
       allowRunningInsecureContent: false
     }
   });
   mainWindow?.webContents.setWindowOpenHandler(({ url }) => {
-    shell.openExternal(url);
+    import_electron.shell.openExternal(url);
     return { action: "deny" };
   });
   mainWindow?.webContents.on("will-navigate", (event, url) => {
@@ -121,20 +122,20 @@ function createWindow() {
     mainWindow = null;
   });
 }
-ipcMain.handle("daemon:start-protection", async (_event, sessionKey) => {
+import_electron.ipcMain.handle("daemon:start-protection", async (_event, sessionKey) => {
   sendToDaemon({ command: "start_protection", sessionKey });
   return { ok: true };
 });
-ipcMain.handle("daemon:stop-protection", async () => {
+import_electron.ipcMain.handle("daemon:stop-protection", async () => {
   sendToDaemon({ command: "stop_protection" });
   return { ok: true };
 });
-ipcMain.handle("daemon:get-status", async () => {
+import_electron.ipcMain.handle("daemon:get-status", async () => {
   sendToDaemon({ command: "get_status" });
   return { ok: true };
 });
-ipcMain.handle("app:get-backend-url", () => BACKEND_URL);
-ipcMain.on("renderer:focus-event", (_event, data) => {
+import_electron.ipcMain.handle("app:get-backend-url", () => BACKEND_URL);
+import_electron.ipcMain.on("renderer:focus-event", (_event, data) => {
   mainWindow?.webContents.send("daemon:event", {
     type: data.type === "blur" ? "focus_loss" : "focus_regained",
     severity: "LOW",
@@ -142,18 +143,21 @@ ipcMain.on("renderer:focus-event", (_event, data) => {
     payload: data
   });
 });
-app.whenReady().then(() => {
+import_electron.app.whenReady().then(() => {
+  if (process.env.NODE_ENV !== "production") {
+    import_electron.app.commandLine.appendSwitch("disable-features", "OutOfBlinkCors");
+  }
   createWindow();
   launchDaemon();
-  app.on("activate", () => {
-    if (BrowserWindow.getAllWindows().length === 0) createWindow();
+  import_electron.app.on("activate", () => {
+    if (import_electron.BrowserWindow.getAllWindows().length === 0) createWindow();
   });
 });
-app.on("window-all-closed", () => {
+import_electron.app.on("window-all-closed", () => {
   sendToDaemon({ command: "stop_protection" });
   daemonProcess?.kill();
-  if (process.platform !== "darwin") app.quit();
+  if (process.platform !== "darwin") import_electron.app.quit();
 });
-if (!app.requestSingleInstanceLock()) {
-  app.quit();
+if (!import_electron.app.requestSingleInstanceLock()) {
+  import_electron.app.quit();
 }

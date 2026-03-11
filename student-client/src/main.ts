@@ -1,6 +1,4 @@
-// @ts-ignore
-const { app, BrowserWindow, ipcMain, shell } = require('electron');
-
+import { app, BrowserWindow, ipcMain, shell } from 'electron';
 import * as path from 'path';
 import { spawn, ChildProcess } from 'child_process';
 import * as net from 'net';
@@ -90,9 +88,9 @@ function createWindow() {
       preload: path.join(__dirname, 'preload.js'),
       contextIsolation: true,       // Security: isolate renderer from Node.js
       nodeIntegration: false,        // Security: no Node.js in renderer
-      sandbox: true,                 // Security: sandbox renderer
-      devTools: process.env.NODE_ENV !== 'production',
-      webSecurity: true,
+      sandbox: false,                // Disable sandbox so preload can use contextBridge
+      devTools: true,
+      webSecurity: process.env.NODE_ENV === 'production', // Relax in dev for cross-origin backend resources
       allowRunningInsecureContent: false,
     },
   });
@@ -149,6 +147,11 @@ ipcMain.on('renderer:focus-event', (_event: any, data: any) => {
 
 // --- App lifecycle ---
 app.whenReady().then(() => {
+  // In dev mode, allow loading cross-origin resources (backend socket.io.js etc.)
+  if (process.env.NODE_ENV !== 'production') {
+    app.commandLine.appendSwitch('disable-features', 'OutOfBlinkCors');
+  }
+
   createWindow();
   launchDaemon();
 
