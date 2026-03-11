@@ -1,0 +1,105 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta http-equiv="Content-Security-Policy"
+    content="default-src 'self' http://localhost:3001 ws://localhost:3001;
+             script-src 'self' http://localhost:3001;
+             style-src 'self' 'unsafe-inline' https://fonts.googleapis.com;
+             font-src https://fonts.gstatic.com;">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>AntiCheat Quiz — Exam Client</title>
+  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&family=Outfit:wght@700;800&display=swap" rel="stylesheet">
+  <link rel="stylesheet" href="style.css" />
+</head>
+<body>
+  <!-- App State Machine Views -->
+  <div id="view-login" class="view active">
+    <div class="screen-center">
+      <div class="logo">🛡️</div>
+      <h1>AntiCheat Quiz</h1>
+      <p class="subtitle">Secure exam client. Sign in with your institutional Google account.</p>
+      <div id="login-error" class="alert hidden"></div>
+      <button id="btn-google-login" class="btn btn-primary btn-lg">
+        <svg width="22" height="22" viewBox="0 0 24 24" style="flex-shrink:0">
+          <path fill="#fff" d="M22.56 12.25c0-.78-.07-1.53-.2-2.25H12v4.26h5.92c-.26 1.37-1.04 2.53-2.21 3.31v2.77h3.57c2.08-1.92 3.28-4.74 3.28-8.09z"/>
+          <path fill="#fff" d="M12 23c2.97 0 5.46-.98 7.28-2.66l-3.57-2.77c-.98.66-2.23 1.06-3.71 1.06-2.86 0-5.29-1.93-6.16-4.53H2.18v2.84C3.99 20.53 7.7 23 12 23z"/>
+          <path fill="#fff" d="M5.84 14.09c-.22-.66-.35-1.36-.35-2.09s.13-1.43.35-2.09V7.07H2.18C1.43 8.55 1 10.22 1 12s.43 3.45 1.18 4.93l2.85-2.22.81-.62z"/>
+          <path fill="#fff" d="M12 5.38c1.62 0 3.06.56 4.21 1.64l3.15-3.15C17.45 2.09 14.97 1 12 1 7.7 1 3.99 3.47 2.18 7.07l3.66 2.84c.87-2.6 3.3-4.53 6.16-4.53z"/>
+        </svg>
+        Sign in with Google
+      </button>
+      <p class="hint">🔒 This session will be monitored and recorded per your institution's exam policy.</p>
+    </div>
+  </div>
+
+  <div id="view-exams" class="view">
+    <div class="exam-container">
+      <div class="top-bar">
+        <div class="logo-sm">🛡️ AntiCheat Quiz</div>
+        <div class="user-info">
+          <span id="user-name"></span>
+          <button id="btn-logout" class="btn btn-ghost btn-sm">Sign Out</button>
+        </div>
+      </div>
+      <h2>Available Exams</h2>
+      <div id="exams-list"></div>
+    </div>
+  </div>
+
+  <div id="view-exam" class="view">
+    <!-- Header bar -->
+    <div class="exam-header">
+      <div style="display:flex;align-items:center;gap:12px">
+        <span class="logo-sm">🛡️</span>
+        <span id="exam-title-header" style="font-weight:600"></span>
+      </div>
+      <div style="display:flex;align-items:center;gap:16px">
+        <div id="daemon-dot" class="daemon-dot" title="Security Daemon"></div>
+        <div id="timer" class="timer">00:00</div>
+        <button id="btn-submit-exam" class="btn btn-danger btn-sm">Submit Exam</button>
+      </div>
+    </div>
+
+    <!-- Alert banner for proctoring events -->
+    <div id="exam-alert" class="exam-alert hidden"></div>
+
+    <!-- Progress -->
+    <div class="progress-bar-container">
+      <div id="progress-bar" class="progress-bar" style="width:0%"></div>
+    </div>
+
+    <!-- Question navigation -->
+    <div class="exam-layout">
+      <aside class="question-nav">
+        <div class="nav-title">Questions</div>
+        <div id="q-nav-buttons"></div>
+      </aside>
+
+      <main class="question-area">
+        <div id="question-display"></div>
+      </main>
+    </div>
+  </div>
+
+  <div id="view-submitted" class="view">
+    <div class="screen-center">
+      <div class="logo">✅</div>
+      <h1>Exam Submitted</h1>
+      <p class="subtitle">Your exam has been submitted successfully. <br/>You may close this window.</p>
+      <div id="submission-details" style="margin-top:24px;font-size:0.85rem;color:#7e8fba"></div>
+    </div>
+  </div>
+
+  <div id="view-lockdown" class="view lockdown-view">
+    <div class="screen-center">
+      <div class="logo">🔒</div>
+      <h1>Exam Locked</h1>
+      <p class="subtitle" id="lockdown-reason">A security policy violation has been detected. Your exam has been submitted and flagged for review.</p>
+      <p style="margin-top:24px;font-size:0.8rem;color:#4c5a7e">Session ID: <span id="lockdown-session-id"></span></p>
+    </div>
+  </div>
+
+  <script src="renderer.js"></script>
+</body>
+</html>

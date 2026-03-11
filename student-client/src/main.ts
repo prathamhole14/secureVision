@@ -1,0 +1,169 @@
+// @ts-ignore
+const { app, BrowserWindow, ipcMain, shell } = require('electron');
+
+import * as path from 'path';
+import { spawn, ChildProcess } from 'child_process';
+import * as net from 'net';
+
+let mainWindow: any = null;
+let daemonProcess: ChildProcess | null = null;
+let daemonSocket: net.Socket | null = null;
+
+const BACKEND_URL = process.env.BACKEND_URL || 'http://localhost:3001';
+const DAEMON_SOCKET_PATH = process.platform === 'win32'
+  ? '\\\\.\\pipe\\anticheat_daemon'
+  : '/tmp/anticheat_daemon.sock';
+
+// --- Daemon IPC ---
+function connectToDaemon() {
+  daemonSocket = net.createConnection(DAEMON_SOCKET_PATH, () => {
+    console.log('[Daemon] Connected to security daemon');
+    mainWindow?.webContents.send('daemon:status', { connected: true });
+  });
+
+  daemonSocket.on('data', (data: Buffer) => {
+    try {
+      const msg = JSON.parse(data.toString());
+      console.log('[Daemon] Event:', msg);
+      mainWindow?.webContents.send('daemon:event', msg);
+    } catch { /* ignore malformed */ }
+  });
+
+  daemonSocket.on('close', () => {
+    console.log('[Daemon] Socket closed, attempting reconnect...');
+    mainWindow?.webContents.send('daemon:status', { connected: false });
+    setTimeout(connectToDaemon, 3000);
+  });
+
+  daemonSocket.on('error', (err) => {
+    console.warn('[Daemon] Socket error:', err.message);
+  });
+}
+
+function launchDaemon() {
+  const daemonPath = path.join(__dirname, '..', 'daemon', 'anticheat-daemon');
+  try {
+    daemonProcess = spawn(daemonPath, [], {
+      detached: false,
+      stdio: ['ignore', 'pipe', 'pipe'],
+    });
+    daemonProcess.stdout?.on('data', (d) => console.log('[Daemon stdout]', d.toString()));
+    daemonProcess.stderr?.on('data', (d) => console.error('[Daemon stderr]', d.toString()));
+
+    daemonProcess.on('error', (err: any) => {
+      console.warn(`[Daemon] Failed to start daemon process: ${err.message}. Ensure it is compiled and placed at ${daemonPath}.`);
+      daemonProcess = null;
+    });
+
+    daemonProcess.on('exit', (code) => {
+      console.log(`[Daemon] Exited with code ${code}`);
+      daemonProcess = null;
+    });
+
+    // Wait a moment for daemon to start listening before connecting
+    setTimeout(connectToDaemon, 1000);
+  } catch (err) {
+    console.warn('[Daemon] Could not launch daemon binary (expected in dev mode):', (err as Error).message);
+    // Still try to connect in case daemon is running externally
+    setTimeout(connectToDaemon, 500);
+  }
+}
+
+function sendToDaemon(message: object) {
+  if (daemonSocket?.writable) {
+    daemonSocket.write(JSON.stringify(message) + '\n');
+  }
+}
+
+// --- Electron Window ---
+function createWindow() {
+  mainWindow = new BrowserWindow({
+    width: 1280,
+    height: 800,
+    // Kiosk mode in production:
+    fullscreen: process.env.NODE_ENV === 'production',
+    kiosk: process.env.NODE_ENV === 'production',
+    resizable: process.env.NODE_ENV !== 'production',
+    frame: process.env.NODE_ENV !== 'production',
+    alwaysOnTop: process.env.NODE_ENV === 'production',
+    webPreferences: {
+      preload: path.join(__dirname, 'preload.js'),
+      contextIsolation: true,       // Security: isolate renderer from Node.js
+      nodeIntegration: false,        // Security: no Node.js in renderer
+      sandbox: true,                 // Security: sandbox renderer
+      devTools: process.env.NODE_ENV !== 'production',
+      webSecurity: true,
+      allowRunningInsecureContent: false,
+    },
+  });
+
+  // Prevent new windows from opening
+  mainWindow?.webContents.setWindowOpenHandler(({ url }: { url: string }) => {
+    shell.openExternal(url);
+    return { action: 'deny' };
+  });
+
+  // Prevent navigation away from the app
+  mainWindow?.webContents.on('will-navigate', (event: any, url: string) => {
+    if (!url.startsWith(BACKEND_URL) && !url.startsWith('file://')) {
+      event.preventDefault();
+    }
+  });
+
+  const indexPath = path.join(__dirname, '..', 'src', 'ui', 'index.html');
+  mainWindow?.loadFile(indexPath);
+
+  // Force devtools to debug renderer JS errors on user's machine
+  mainWindow?.webContents.openDevTools();
+
+  mainWindow?.on('closed', () => { mainWindow = null; });
+}
+
+// --- IPC Handlers ---
+ipcMain.handle('daemon:start-protection', async (_event: any, sessionKey: string) => {
+  sendToDaemon({ command: 'start_protection', sessionKey });
+  return { ok: true };
+});
+
+ipcMain.handle('daemon:stop-protection', async () => {
+  sendToDaemon({ command: 'stop_protection' });
+  return { ok: true };
+});
+
+ipcMain.handle('daemon:get-status', async () => {
+  sendToDaemon({ command: 'get_status' });
+  return { ok: true };
+});
+
+ipcMain.handle('app:get-backend-url', () => BACKEND_URL);
+
+// Soft JS-level blur detection reported to daemon bridge
+ipcMain.on('renderer:focus-event', (_event: any, data: any) => {
+  mainWindow?.webContents.send('daemon:event', {
+    type: data.type === 'blur' ? 'focus_loss' : 'focus_regained',
+    severity: 'LOW',
+    timestamp: new Date().toISOString(),
+    payload: data,
+  });
+});
+
+// --- App lifecycle ---
+app.whenReady().then(() => {
+  createWindow();
+  launchDaemon();
+
+  app.on('activate', () => {
+    if (BrowserWindow.getAllWindows().length === 0) createWindow();
+  });
+});
+
+app.on('window-all-closed', () => {
+  sendToDaemon({ command: 'stop_protection' });
+  daemonProcess?.kill();
+  if (process.platform !== 'darwin') app.quit();
+});
+
+// Prevent multiple instances
+if (!app.requestSingleInstanceLock()) {
+  app.quit();
+}
