@@ -69,7 +69,8 @@ function connectToDaemon() {
   });
 }
 function launchDaemon() {
-  const daemonPath = path.join(__dirname, "..", "daemon", "anticheat-daemon");
+  const daemonBinary = process.platform === "win32" ? "anticheat-daemon.exe" : "anticheat-daemon";
+  const daemonPath = path.join(__dirname, "..", "daemon", daemonBinary);
   try {
     daemonProcess = (0, import_child_process.spawn)(daemonPath, [], {
       detached: false,
@@ -100,11 +101,12 @@ function createWindow() {
   mainWindow = new BrowserWindow({
     width: 1280,
     height: 800,
-    // Kiosk mode in production:
-    fullscreen: process.env.NODE_ENV === "production",
-    kiosk: process.env.NODE_ENV === "production",
-    resizable: process.env.NODE_ENV !== "production",
-    frame: process.env.NODE_ENV !== "production",
+    // Exam client should ideally be fullscreen in dev too for testing the experience,
+    // but at the very least we should allow it to be maximized when requested.
+    fullscreen: true,
+    kiosk: true,
+    resizable: false,
+    frame: false,
     alwaysOnTop: process.env.NODE_ENV === "production",
     webPreferences: {
       preload: path.join(__dirname, "preload.js"),
@@ -131,7 +133,6 @@ function createWindow() {
   });
   const indexPath = path.join(__dirname, "..", "src", "ui", "index.html");
   mainWindow?.loadFile(indexPath);
-  mainWindow?.webContents.openDevTools();
   mainWindow?.on("closed", () => {
     mainWindow = null;
   });
@@ -149,6 +150,20 @@ ipcMain.handle("daemon:get-status", async () => {
   return { ok: true };
 });
 ipcMain.handle("app:get-backend-url", () => BACKEND_URL);
+ipcMain.handle("app:request-fullscreen", async () => {
+  if (mainWindow) {
+    mainWindow.maximize();
+    mainWindow.setFullScreen(true);
+    mainWindow.setAlwaysOnTop(true, "screen-saver");
+  }
+  return { ok: true };
+});
+ipcMain.handle("app:close", async () => {
+  if (daemonProcess) {
+    daemonProcess.kill();
+  }
+  app.exit(0);
+});
 ipcMain.on("renderer:focus-event", (_event, data) => {
   mainWindow?.webContents.send("daemon:event", {
     type: data.type === "blur" ? "focus_loss" : "focus_regained",

@@ -14,6 +14,8 @@ contextBridge.exposeInMainWorld('electronAPI', {
 
   // Config
   getBackendUrl: () => ipcRenderer.invoke('app:get-backend-url'),
+  requestFullscreen: () => ipcRenderer.invoke('app:request-fullscreen'),
+  closeApp: () => ipcRenderer.invoke('app:close'),
 
   // Daemon push events (one-way: Main → Renderer)
   onDaemonEvent: (callback: (event: object) => void) => {

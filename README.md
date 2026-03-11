@@ -44,7 +44,8 @@ vision/
 ### Requirements
 - Node.js 20+
 - Rust + Cargo (stable)
-- Docker & docker-compose
+- **Windows**: [Docker Desktop](https://www.docker.com/products/docker-desktop/) (includes `docker-compose`)
+- **Linux/macOS**: Docker & docker-compose
 - npm
 
 ---
@@ -63,7 +64,10 @@ docker-compose up -d
 cd backend
 
 # Copy & configure environment
+# Bash / Git Bash / WSL:
 cp .env.example .env
+# PowerShell:
+# Copy-Item .env.example .env
 # Edit .env with your GOOGLE_CLIENT_ID
 
 # Install dependencies
@@ -115,21 +119,42 @@ cd security-daemon
 # Debug build (emits mock events every ~5 seconds for testing)
 cargo run
 
-# Or release build (production)
+# Or release build — Linux/macOS:
 cargo build --release && ./target/release/anticheat-daemon
+
+# Or release build — Windows (PowerShell):
+# cargo build --release; .\target\release\anticheat-daemon.exe
 ```
 
-Daemon listens on: `/tmp/anticheat_daemon.sock`
+Daemon IPC:
+- **Windows**: Named Pipe `\\.\pipe\anticheat_daemon`
+- **Linux/macOS**: Unix socket `/tmp/anticheat_daemon.sock`
+
+> **Windows Note**: Copy the built `anticheat-daemon.exe` to `student-client/daemon/anticheat-daemon.exe` before running the Electron client.
+
+---
+
+### 6. Rerunning the Entire Project (Clean Restart)
+
+If you need to forcefully stop all background services (like dangling Electron instances) and do a clean restart of the backend, dashboard, and client concurrently, run this PowerShell script from the root `secureVision/` directory:
+
+```powershell
+Get-Process node, electron, anticheat-daemon -ErrorAction SilentlyContinue | Stop-Process -Force
+Start-Sleep 2
+Start-Process powershell -ArgumentList "-NoExit -Command cd backend; npm run dev"
+Start-Process powershell -ArgumentList "-NoExit -Command cd dashboard; npm run dev"
+Start-Process powershell -ArgumentList "-NoExit -Command cd student-client; npm run build; npm run start"
+```
 
 ---
 
 ## Component Communication
 
 ```
-Rust Daemon <--(Unix socket JSON IPC)--> Electron Main Process
-Electron Main <--(contextBridge/preload)--> Renderer (student UI)
-Renderer <-----(REST / WebSocket WSS)-----> Node Backend
-Dashboard <----(React + Socket.IO)--------> Node Backend
+Rust Daemon <--(Named Pipe / Unix socket JSON IPC)--> Electron Main Process
+Electron Main <--(contextBridge/preload)-------------> Renderer (student UI)
+Renderer <---------(REST / WebSocket WSS)------------> Node Backend
+Dashboard <----------(React + Socket.IO)-------------> Node Backend
 ```
 
 ---

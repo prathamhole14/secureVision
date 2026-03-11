@@ -277,6 +277,14 @@ async function startExam(examId) {
   // Start daemon protection
   window.electronAPI.startProtection(data.sessionToken);
 
+  // Auto-Fullscreen (Try both HTML5 API and Electron IPC)
+  try {
+    document.documentElement.requestFullscreen?.();
+  } catch (err) {
+    console.warn('HTML5 requestFullscreen failed:', err);
+  }
+  window.electronAPI.requestFullscreen?.();
+
   // Join socket room
   socket?.emit('student:join', { sessionId: data.sessionId });
 
@@ -360,7 +368,7 @@ async function submitExam(reason) {
   window.electronAPI.stopProtection();
   await fetch(`${backendUrl}/api/sessions/${state.session.id}/status`, {
     method: 'PATCH', headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${state.token}` },
-    body: JSON.stringify({ status: 'COMPLETED' }),
+    body: JSON.stringify({ status: 'COMPLETED', answers: state.answers }),
   });
   document.getElementById('submission-details').textContent =
     `Session ID: ${state.session.id} · Reason: ${reason}`;
@@ -370,3 +378,28 @@ async function submitExam(reason) {
 document.getElementById('btn-submit-exam').addEventListener('click', () => {
   if (confirm('Are you sure you want to submit? This cannot be undone.')) submitExam('Student early submission');
 });
+
+// === Exit App ===
+const exitBtn = document.getElementById('btn-exit-app');
+if (exitBtn) {
+  exitBtn.addEventListener('click', () => {
+    console.log('Exit button clicked');
+    if (window.electronAPI && window.electronAPI.closeApp) {
+      window.electronAPI.closeApp();
+    } else {
+      console.error('electronAPI.closeApp not found');
+    }
+  });
+}
+
+const exitLockdownBtn = document.getElementById('btn-exit-app-lockdown');
+if (exitLockdownBtn) {
+  exitLockdownBtn.addEventListener('click', () => {
+    console.log('Exit lockdown button clicked');
+    if (window.electronAPI && window.electronAPI.closeApp) {
+      window.electronAPI.closeApp();
+    } else {
+      console.error('electronAPI.closeApp not found');
+    }
+  });
+}

@@ -100,11 +100,29 @@ export function initSocketIO(httpServer: HttpServer) {
       socket.join(`professor:${examId}`);
       logger.info(`Professor ${user.email} monitoring exam ${examId}`);
 
-      // Send list of currently active sessions
-      const activeSessions = await prisma.session.findMany({
-        where: { examId, status: 'ACTIVE' },
-        include: { user: { select: { id: true, name: true, email: true } } },
+      // Fetch all non-pending sessions, including their flags and recent events
+      const sessions = await prisma.session.findMany({
+        where: { examId, status: { not: 'PENDING' } },
+        include: {
+          user: { select: { id: true, name: true, email: true } },
+          flags: true,
+          events: {
+            orderBy: { timestamp: 'desc' },
+            take: 5,
+          },
+        },
       });
+
+      // Map to the activeSessions structure expected by the frontend
+      const activeSessions = sessions.map(s => ({
+        id: s.id,
+        user: s.user,
+        status: s.status,
+        startedAt: s.startedAt,
+        flags: s.flags,
+        events: s.events,
+      }));
+
       socket.emit('monitor:init', { activeSessions });
     });
 

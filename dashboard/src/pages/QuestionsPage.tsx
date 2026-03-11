@@ -84,15 +84,33 @@ export default function QuestionsPage() {
 
   function handleAddQuestion() {
     if (!newQ.text.trim()) return;
+    
+    let processedQ = { ...newQ, id: newId() };
+
     if (newQ.type === 'multiple_choice') {
-      const opts = (newQ.options || []).filter((o) => o.trim());
-      if (opts.length < 2) {
+      // Find the original correct option text
+      const originalOptions = newQ.options || [];
+      const correctOptionText = originalOptions[newQ.answer || 0] || '';
+
+      // Filter out empty options
+      const filteredOpts = originalOptions.filter((o) => o.trim() !== '');
+      
+      if (filteredOpts.length < 2) {
         setError('Please provide at least 2 options for MCQ.');
         return;
       }
+
+      // Re-map the answer index to the new filtered array
+      // If the previously selected correct answer was empty, default to 0
+      let newAnswerIndex = filteredOpts.indexOf(correctOptionText);
+      if (newAnswerIndex === -1) newAnswerIndex = 0;
+
+      processedQ.options = filteredOpts;
+      processedQ.answer = newAnswerIndex;
     }
+
     setError('');
-    setQuestions([...questions, { ...newQ, id: newId() }]);
+    setQuestions([...questions, processedQ]);
     setNewQ(addType === 'multiple_choice' ? blankMCQ() : blankShort());
   }
 
