@@ -167,8 +167,10 @@ setInterval(flushTelemetry, 5000);
 function connectSocket(backendUrl) {
   // Dynamically load socket.io-client from CDN (Electron packager will bundle this)
   const script = document.createElement('script');
-  script.src = `${backendUrl}/socket.io/socket.io.js`;
+  // Backend configures Socket.IO with path: '/ws'
+  script.src = `${backendUrl}/ws/socket.io.js`;
   script.onload = () => initSocket(backendUrl);
+  script.onerror = () => console.error('Failed to load socket.io.js from backend');
   document.head.appendChild(script);
 }
 

@@ -167,6 +167,21 @@ router.post('/:id/start', requireAuth, async (req: AuthRequest, res: Response) =
     return;
   }
 
+  // Parse config and strip out correct answers for the student
+  let config: any = {};
+  if (typeof exam.configJson === 'string') {
+    try { config = JSON.parse(exam.configJson); } catch {}
+  } else {
+    config = exam.configJson || {};
+  }
+  const safeConfig = {
+    ...config,
+    questions: (config.questions || []).map((q: any) => {
+      const { answer, ...safeQ } = q; // remove the answer key
+      return safeQ;
+    }),
+  };
+
   // Check for existing active session
   const existingSession = await prisma.session.findFirst({
     where: {
@@ -176,7 +191,12 @@ router.post('/:id/start', requireAuth, async (req: AuthRequest, res: Response) =
     },
   });
   if (existingSession) {
-    res.json({ sessionToken: existingSession.sessionToken, sessionId: existingSession.id });
+    res.json({
+      sessionToken: existingSession.sessionToken,
+      sessionId: existingSession.id,
+      examConfig: safeConfig,
+      duration: exam.duration,
+    });
     return;
   }
 
@@ -192,7 +212,7 @@ router.post('/:id/start', requireAuth, async (req: AuthRequest, res: Response) =
   res.status(201).json({
     sessionId: session.id,
     sessionToken: session.sessionToken,
-    examConfig: exam.configJson,
+    examConfig: safeConfig,
     duration: exam.duration,
   });
 });

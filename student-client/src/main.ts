@@ -1,11 +1,11 @@
-import { app, BrowserWindow, ipcMain, shell } from 'electron';
-import * as path from 'path';
-import { spawn, ChildProcess } from 'child_process';
-import * as net from 'net';
+const electron = require('electron');
+const path = require('path');
+const { spawn } = require('child_process');
+const net = require('net');
 
 let mainWindow: any = null;
-let daemonProcess: ChildProcess | null = null;
-let daemonSocket: net.Socket | null = null;
+let daemonProcess: any = null;
+let daemonSocket: any = null;
 
 const BACKEND_URL = process.env.BACKEND_URL || 'http://localhost:3001';
 const DAEMON_SOCKET_PATH = process.platform === 'win32'
@@ -13,9 +13,11 @@ const DAEMON_SOCKET_PATH = process.platform === 'win32'
   : '/tmp/anticheat_daemon.sock';
 
 // --- Daemon IPC ---
+let reconnectDelay = 2000;
 function connectToDaemon() {
   daemonSocket = net.createConnection(DAEMON_SOCKET_PATH, () => {
     console.log('[Daemon] Connected to security daemon');
+    reconnectDelay = 2000; // Reset on success
     mainWindow?.webContents.send('daemon:status', { connected: true });
   });
 
@@ -28,12 +30,20 @@ function connectToDaemon() {
   });
 
   daemonSocket.on('close', () => {
-    console.log('[Daemon] Socket closed, attempting reconnect...');
+    // Check dev mode to suppress verbose connection loss spam
+    if (process.env.NODE_ENV === 'production' || reconnectDelay < 10000) {
+      console.log(`[Daemon] Socket closed, attempting reconnect in ${reconnectDelay}ms...`);
+    }
     mainWindow?.webContents.send('daemon:status', { connected: false });
-    setTimeout(connectToDaemon, 3000);
+    setTimeout(connectToDaemon, reconnectDelay);
+    reconnectDelay = Math.min(reconnectDelay * 1.5, 30000); // Exponential backoff up to 30s
   });
 
-  daemonSocket.on('error', (err) => {
+  daemonSocket.on('error', (err: any) => {
+    if (process.env.NODE_ENV !== 'production' && err.code === 'ENOENT') {
+      // Suppress missing daemon socket spam in dev mode
+      return;
+    }
     console.warn('[Daemon] Socket error:', err.message);
   });
 }
@@ -45,15 +55,15 @@ function launchDaemon() {
       detached: false,
       stdio: ['ignore', 'pipe', 'pipe'],
     });
-    daemonProcess.stdout?.on('data', (d) => console.log('[Daemon stdout]', d.toString()));
-    daemonProcess.stderr?.on('data', (d) => console.error('[Daemon stderr]', d.toString()));
+    daemonProcess.stdout?.on('data', (d: any) => console.log('[Daemon stdout]', d.toString()));
+    daemonProcess.stderr?.on('data', (d: any) => console.error('[Daemon stderr]', d.toString()));
 
     daemonProcess.on('error', (err: any) => {
       console.warn(`[Daemon] Failed to start daemon process: ${err.message}. Ensure it is compiled and placed at ${daemonPath}.`);
       daemonProcess = null;
     });
 
-    daemonProcess.on('exit', (code) => {
+    daemonProcess.on('exit', (code: any) => {
       console.log(`[Daemon] Exited with code ${code}`);
       daemonProcess = null;
     });
@@ -75,7 +85,7 @@ function sendToDaemon(message: object) {
 
 // --- Electron Window ---
 function createWindow() {
-  mainWindow = new BrowserWindow({
+  mainWindow = new electron.BrowserWindow({
     width: 1280,
     height: 800,
     // Kiosk mode in production:
@@ -97,7 +107,7 @@ function createWindow() {
 
   // Prevent new windows from opening
   mainWindow?.webContents.setWindowOpenHandler(({ url }: { url: string }) => {
-    shell.openExternal(url);
+    electron.shell.openExternal(url);
     return { action: 'deny' };
   });
 
@@ -118,25 +128,25 @@ function createWindow() {
 }
 
 // --- IPC Handlers ---
-ipcMain.handle('daemon:start-protection', async (_event: any, sessionKey: string) => {
+electron.ipcMain.handle('daemon:start-protection', async (_event: any, sessionKey: string) => {
   sendToDaemon({ command: 'start_protection', sessionKey });
   return { ok: true };
 });
 
-ipcMain.handle('daemon:stop-protection', async () => {
+electron.ipcMain.handle('daemon:stop-protection', async () => {
   sendToDaemon({ command: 'stop_protection' });
   return { ok: true };
 });
 
-ipcMain.handle('daemon:get-status', async () => {
+electron.ipcMain.handle('daemon:get-status', async () => {
   sendToDaemon({ command: 'get_status' });
   return { ok: true };
 });
 
-ipcMain.handle('app:get-backend-url', () => BACKEND_URL);
+electron.ipcMain.handle('app:get-backend-url', () => BACKEND_URL);
 
 // Soft JS-level blur detection reported to daemon bridge
-ipcMain.on('renderer:focus-event', (_event: any, data: any) => {
+electron.ipcMain.on('renderer:focus-event', (_event: any, data: any) => {
   mainWindow?.webContents.send('daemon:event', {
     type: data.type === 'blur' ? 'focus_loss' : 'focus_regained',
     severity: 'LOW',
@@ -146,27 +156,27 @@ ipcMain.on('renderer:focus-event', (_event: any, data: any) => {
 });
 
 // --- App lifecycle ---
-app.whenReady().then(() => {
+electron.app.whenReady().then(() => {
   // In dev mode, allow loading cross-origin resources (backend socket.io.js etc.)
   if (process.env.NODE_ENV !== 'production') {
-    app.commandLine.appendSwitch('disable-features', 'OutOfBlinkCors');
+    electron.app.commandLine.appendSwitch('disable-features', 'OutOfBlinkCors');
   }
 
   createWindow();
   launchDaemon();
 
-  app.on('activate', () => {
-    if (BrowserWindow.getAllWindows().length === 0) createWindow();
+  electron.app.on('activate', () => {
+    if (electron.BrowserWindow.getAllWindows().length === 0) createWindow();
   });
 });
 
-app.on('window-all-closed', () => {
+electron.app.on('window-all-closed', () => {
   sendToDaemon({ command: 'stop_protection' });
   daemonProcess?.kill();
-  if (process.platform !== 'darwin') app.quit();
+  if (process.platform !== 'darwin') electron.app.quit();
 });
 
 // Prevent multiple instances
-if (!app.requestSingleInstanceLock()) {
-  app.quit();
+if (!electron.app.requestSingleInstanceLock()) {
+  electron.app.quit();
 }

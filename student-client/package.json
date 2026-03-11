@@ -5,7 +5,7 @@
   "main": "dist/main.js",
   "scripts": {
     "dev": "npm run build && electron dist/main.js --no-sandbox",
-    "build": "esbuild src/main.ts --bundle --platform=node --external:electron --outfile=dist/main.js",
+    "build": "tsc -p tsconfig.json",
     "start": "electron dist/main.js --no-sandbox",
     "package": "electron-builder"
   },
