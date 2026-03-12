@@ -4,12 +4,12 @@
   "description": "secureVision Platform Backend",
   "main": "dist/index.js",
   "scripts": {
-    "dev": "ts-node-dev --respawn --transpile-only src/index.ts",
+    "dev": "ts-node-dev --respawn --transpile-only --exit-child src/index.ts",
     "build": "tsc",
     "start": "node dist/index.js",
     "db:migrate": "prisma migrate dev",
     "db:generate": "prisma generate",
-    "db:seed": "ts-node prisma/seed.ts",
+    "db:seed": "ts-node --transpile-only prisma/seed.ts",
     "test": "jest --runInBand --forceExit"
   },
   "dependencies": {

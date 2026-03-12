@@ -29,17 +29,60 @@ router.get('/:id', requireAuth, async (req: AuthRequest, res: Response) => {
 
 // PATCH /api/sessions/:id/status — update status (server or professor)
 router.patch('/:id/status', requireAuth, async (req: AuthRequest, res: Response) => {
-  const { status } = req.body;
+  const { status, answers } = req.body;
   const validStatuses = ['ACTIVE', 'COMPLETED', 'TERMINATED', 'FLAGGED'];
   if (!validStatuses.includes(status)) {
     res.status(400).json({ error: 'Invalid status' });
     return;
   }
-  const session = await prisma.session.findUnique({ where: { id: req.params.id } });
+  const session = await prisma.session.findUnique({ 
+    where: { id: req.params.id },
+    include: { exam: true }
+  });
   if (!session) {
     res.status(404).json({ error: 'Session not found' });
     return;
   }
+
+  // Handle auto-grading if answers are provided on completion
+  if (status === 'COMPLETED' && answers && session.exam?.configJson) {
+    let config: any = {};
+    try {
+      config = typeof session.exam.configJson === 'string' 
+        ? JSON.parse(session.exam.configJson) 
+        : session.exam.configJson;
+    } catch (e) { console.error('Error parsing config for auto-grading'); }
+
+    const questions = config.questions || [];
+    let score = 0;
+    let maxPoints = config.totalPoints || 0;
+
+    questions.forEach((q: any) => {
+      const p = parseInt(q.points) || 0;
+      if (answers[q.id] !== undefined) {
+        if (q.type === 'multiple_choice' && answers[q.id] === q.answer) {
+          score += p;
+        } else if (q.type === 'short_answer') {
+          // Rudimentary short-answer auto grade: case-insensitive match if answer key provided
+          if (q.answer && String(answers[q.id]).toLowerCase().trim() === String(q.answer).toLowerCase().trim()) {
+            score += p;
+          }
+        }
+      }
+    });
+
+    // Save the submission details as a telemetry event
+    await prisma.event.create({
+      data: {
+        sessionId: session.id,
+        timestamp: new Date(),
+        type: 'exam_submitted',
+        payloadJson: JSON.stringify({ answers, score, maxPoints }),
+        severity: 'LOW',
+      }
+    });
+  }
+
   const updated = await prisma.session.update({
     where: { id: req.params.id },
     data: {

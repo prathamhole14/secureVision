@@ -1,8 +1,12 @@
 //! AntiCheat Security Daemon
 //!
-//! This daemon runs as a user-level service alongside the Electron exam client.
-//! It performs OS-level checks and reports security events via a Unix Domain Socket
-//! (or Named Pipe on Windows) to the Electron parent process.
+//! Cross-platform daemon that runs alongside the Electron exam client.
+//! It performs OS-level checks and reports security events via IPC to the
+//! Electron parent process.
+//!
+//! IPC transport:
+//!   Windows — Named Pipe  : \\.\pipe\anticheat_daemon
+//!   Linux/macOS — Unix socket: /tmp/anticheat_daemon.sock
 //!
 //! IPC Protocol: newline-delimited JSON messages.
 //!
@@ -18,7 +22,6 @@
 
 use std::sync::{Arc, atomic::{AtomicBool, Ordering}};
 use std::time::Duration;
-use tokio::net::{UnixListener, UnixStream};
 use tokio::io::{AsyncBufReadExt, AsyncWriteExt, BufReader};
 use tokio::sync::broadcast;
 use serde::{Deserialize, Serialize};
@@ -63,11 +66,13 @@ struct StatusResponse {
     version: String,
 }
 
-// ── Socket Path ────────────────────────────────────────────────────────────
+// ── IPC Path / Name ────────────────────────────────────────────────────────
 
-fn socket_path() -> &'static str {
-    "/tmp/anticheat_daemon.sock"
-}
+#[cfg(windows)]
+const PIPE_NAME: &str = r"\\.\pipe\anticheat_daemon";
+
+#[cfg(unix)]
+const SOCKET_PATH: &str = "/tmp/anticheat_daemon.sock";
 
 // ── Main ───────────────────────────────────────────────────────────────────
 
@@ -78,15 +83,84 @@ async fn main() {
         .with_level(true)
         .init();
 
-    // Remove stale socket file
-    let _ = std::fs::remove_file(socket_path());
-
-    let listener = UnixListener::bind(socket_path())
-        .expect("Failed to bind Unix socket");
-    info!("🔐 AntiCheat Daemon listening on {}", socket_path());
-
     let (event_tx, _) = broadcast::channel::<TelemetryEvent>(256);
     let protecting = Arc::new(AtomicBool::new(false));
+
+    #[cfg(windows)]
+    run_windows_server(event_tx, protecting).await;
+
+    #[cfg(unix)]
+    run_unix_server(event_tx, protecting).await;
+}
+
+// ── Windows Named Pipe Server ──────────────────────────────────────────────
+
+#[cfg(windows)]
+async fn run_windows_server(
+    event_tx: broadcast::Sender<TelemetryEvent>,
+    protecting: Arc<AtomicBool>,
+) {
+    use tokio::net::windows::named_pipe::ServerOptions;
+
+    info!("🔐 AntiCheat Daemon starting on Windows Named Pipe: {}", PIPE_NAME);
+
+    let mut first = true;
+    loop {
+        // The very first instance must use first_pipe_instance(true) to register the name.
+        // Subsequent instances (waiting for next client) use false.
+        let server = match ServerOptions::new()
+            .first_pipe_instance(first)
+            .create(PIPE_NAME)
+        {
+            Ok(s) => { first = false; s }
+            Err(e) => {
+                error!("Failed to create named pipe server: {}", e);
+                tokio::time::sleep(Duration::from_secs(1)).await;
+                continue;
+            }
+        };
+
+        // Wait for a client to connect
+        if let Err(e) = server.connect().await {
+            error!("Named pipe connect() error: {}", e);
+            continue;
+        }
+
+        info!("Client connected via Named Pipe");
+        let tx = event_tx.clone();
+        let rx = event_tx.subscribe();
+        let protecting_clone = Arc::clone(&protecting);
+        tokio::spawn(handle_pipe_client(server, tx, rx, protecting_clone));
+    }
+}
+
+#[cfg(windows)]
+async fn handle_pipe_client(
+    stream: tokio::net::windows::named_pipe::NamedPipeServer,
+    event_tx: broadcast::Sender<TelemetryEvent>,
+    mut event_rx: broadcast::Receiver<TelemetryEvent>,
+    protecting: Arc<AtomicBool>,
+) {
+    use tokio::io::split;
+    let (read_half, write_half) = split(stream);
+    handle_connection(read_half, write_half, event_tx, event_rx, protecting).await;
+}
+
+// ── Unix Domain Socket Server ──────────────────────────────────────────────
+
+#[cfg(unix)]
+async fn run_unix_server(
+    event_tx: broadcast::Sender<TelemetryEvent>,
+    protecting: Arc<AtomicBool>,
+) {
+    use tokio::net::UnixListener;
+
+    // Remove stale socket file
+    let _ = std::fs::remove_file(SOCKET_PATH);
+
+    let listener = UnixListener::bind(SOCKET_PATH)
+        .expect("Failed to bind Unix socket");
+    info!("🔐 AntiCheat Daemon listening on {}", SOCKET_PATH);
 
     loop {
         match listener.accept().await {
@@ -94,7 +168,7 @@ async fn main() {
                 let tx = event_tx.clone();
                 let rx = event_tx.subscribe();
                 let protecting_clone = Arc::clone(&protecting);
-                tokio::spawn(handle_client(stream, tx, rx, protecting_clone));
+                tokio::spawn(handle_unix_client(stream, tx, rx, protecting_clone));
             }
             Err(e) => {
                 error!("Accept error: {}", e);
@@ -103,16 +177,30 @@ async fn main() {
     }
 }
 
-// ── Client Handler ─────────────────────────────────────────────────────────
+#[cfg(unix)]
+async fn handle_unix_client(
+    stream: tokio::net::UnixStream,
+    event_tx: broadcast::Sender<TelemetryEvent>,
+    event_rx: broadcast::Receiver<TelemetryEvent>,
+    protecting: Arc<AtomicBool>,
+) {
+    let (read_half, write_half) = stream.into_split();
+    handle_connection(read_half, write_half, event_tx, event_rx, protecting).await;
+}
 
-async fn handle_client(
-    stream: UnixStream,
+// ── Shared Client Handler ──────────────────────────────────────────────────
+
+async fn handle_connection<R, W>(
+    read_half: R,
+    mut write_half: W,
     event_tx: broadcast::Sender<TelemetryEvent>,
     mut event_rx: broadcast::Receiver<TelemetryEvent>,
     protecting: Arc<AtomicBool>,
-) {
+) where
+    R: tokio::io::AsyncRead + Unpin + Send + 'static,
+    W: tokio::io::AsyncWrite + Unpin + Send + 'static,
+{
     info!("Client connected");
-    let (read_half, mut write_half) = stream.into_split();
     let mut reader = BufReader::new(read_half);
 
     // Spawn scanner tasks that run when protection is active
@@ -206,13 +294,10 @@ fn apply_drm_policy() {
     #[cfg(target_os = "linux")]
     {
         info!("Linux: attempting to detect pipewire/wayland screensharing sessions");
-        // In production: check /proc or dbus for pipewire-portal screenshare sessions
-        // and kill or block them based on policy.
     }
     #[cfg(target_os = "macos")]
     {
         info!("macOS: NSWindowSharingNone policy would be applied by main Electron process");
-        // Electron's main process handles this for the BrowserWindow.
     }
     #[cfg(target_os = "windows")]
     {
@@ -228,7 +313,6 @@ async fn scanner_loop(
     tx: broadcast::Sender<TelemetryEvent>,
     protecting: Arc<AtomicBool>,
 ) {
-    let mut rng = rand::thread_rng();
     let mut tick = 0u64;
 
     loop {
@@ -244,6 +328,7 @@ async fn scanner_loop(
         // --- Mock events for integration testing in DEV ---
         #[cfg(debug_assertions)]
         {
+             let mut rng = rand::thread_rng();
             let mock_event = match rng.gen_range(0..10) {
                 0 => Some(TelemetryEvent::new(
                     "screen_capture_attempt", "HIGH",
@@ -283,8 +368,8 @@ async fn scanner_loop(
 // ── Platform Checks ────────────────────────────────────────────────────────
 
 fn check_remote_session(tx: &broadcast::Sender<TelemetryEvent>) {
-    // Linux: check for SSH_CONNECTION or DISPLAY pointing to remote
-    #[cfg(target_os = "linux")]
+    // Linux/macOS: check for SSH_CONNECTION environment variable
+    #[cfg(unix)]
     {
         if std::env::var("SSH_CONNECTION").is_ok() {
             warn!("SSH_CONNECTION detected — potential remote session");
@@ -294,22 +379,32 @@ fn check_remote_session(tx: &broadcast::Sender<TelemetryEvent>) {
             ));
         }
     }
-    // Windows: GetSystemMetrics(SM_REMOTESESSION)
-    // This would require windows-sys crate in production
-    #[cfg(target_os = "windows")]
+
+    // Windows: check SESSIONNAME env var (set to "Console" for local, "RDP-Tcp#N" for RDP)
+    #[cfg(windows)]
     {
-        // TODO: use winapi::um::winuser::GetSystemMetrics(SM_REMOTESESSION)
+        if let Ok(session_name) = std::env::var("SESSIONNAME") {
+            if session_name.to_uppercase().starts_with("RDP") {
+                warn!("RDP session detected (SESSIONNAME={})", session_name);
+                let _ = tx.send(TelemetryEvent::new(
+                    "remote_session_detected", "HIGH",
+                    serde_json::json!({ "method": "RDP", "session": session_name }),
+                ));
+            }
+        }
     }
 }
 
 async fn check_process_list(tx: &broadcast::Sender<TelemetryEvent>) {
-    // Read /proc to list running processes on Linux
+    let blacklist = [
+        "anydesk", "teamviewer", "vncviewer", "vncserver", "xrdp",
+        "obs64", "obs32", "obs", "obs-studio", "discord",
+        "screenconnect", "logmein", "ammyy", "remotepc",
+    ];
+
+    // Linux: read /proc filesystem
     #[cfg(target_os = "linux")]
     {
-        let blacklist = [
-            "anydesk", "teamviewer", "vnc", "xrdp",
-            "obs", "obs-studio", "screencast", "discord",
-        ];
         if let Ok(entries) = tokio::fs::read_dir("/proc").await {
             let mut entries = entries;
             while let Ok(Some(entry)) = entries.next_entry().await {
@@ -328,6 +423,59 @@ async fn check_process_list(tx: &broadcast::Sender<TelemetryEvent>) {
                                 ));
                             }
                         }
+                    }
+                }
+            }
+        }
+    }
+
+    // Windows: use `tasklist.exe` to enumerate running processes
+    #[cfg(windows)]
+    {
+        use std::process::Command;
+        match Command::new("tasklist")
+            .args(["/fo", "csv", "/nh"])
+            .output()
+        {
+            Ok(output) => {
+                let stdout = String::from_utf8_lossy(&output.stdout);
+                for line in stdout.lines() {
+                    // CSV format: "process.exe","PID","Session","Num","Mem"
+                    let name = line.split(',').next().unwrap_or("").trim_matches('"').to_lowercase();
+                    // Strip .exe suffix for comparison
+                    let name_no_ext = name.trim_end_matches(".exe");
+                    for bl in &blacklist {
+                        if name_no_ext.contains(bl) {
+                            warn!("Blacklisted process detected: {}", name);
+                            let _ = tx.send(TelemetryEvent::new(
+                                "process_detected", "MEDIUM",
+                                serde_json::json!({ "process": name, "source": "tasklist" }),
+                            ));
+                        }
+                    }
+                }
+            }
+            Err(e) => {
+                warn!("Failed to run tasklist: {}", e);
+            }
+        }
+    }
+
+    // macOS: use `ps` to enumerate running processes
+    #[cfg(target_os = "macos")]
+    {
+        use std::process::Command;
+        if let Ok(output) = Command::new("ps").args(["-ax", "-o", "comm="]).output() {
+            let stdout = String::from_utf8_lossy(&output.stdout);
+            for line in stdout.lines() {
+                let name = line.trim().to_lowercase();
+                for bl in &blacklist {
+                    if name.contains(bl) {
+                        warn!("Blacklisted process detected: {}", name);
+                        let _ = tx.send(TelemetryEvent::new(
+                            "process_detected", "MEDIUM",
+                            serde_json::json!({ "process": name, "source": "ps" }),
+                        ));
                     }
                 }
             }
