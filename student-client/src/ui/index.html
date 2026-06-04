@@ -1,0 +1,138 @@
+<!DOCTYPE html>
+<html lang="en">
+
+<head>
+  <meta charset="UTF-8" />
+  <meta http-equiv="Content-Security-Policy" content="default-src 'self' http://localhost:3001 ws://localhost:3001;
+             script-src 'self' http://localhost:3001 'unsafe-inline';
+             style-src 'self' 'unsafe-inline' https://fonts.googleapis.com;
+             font-src https://fonts.gstatic.com;
+             connect-src http://localhost:3001 ws://localhost:3001 http://localhost:3001/ws;
+             img-src 'self' data:;">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>secureVision — Exam Client</title>
+  <link
+    href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&family=Outfit:wght@700;800&display=swap"
+    rel="stylesheet">
+  <link rel="stylesheet" href="style.css" />
+</head>
+
+<body>
+  <!-- App State Machine Views -->
+  <div id="view-login" class="view active">
+    <div class="screen-center">
+      <div class="logo">🛡️</div>
+      <h1>secureVision</h1>
+      <p class="subtitle">Secure examinee client. Enter your unique <b>Exam Access Code</b> from the Student Portal to begin.</p>
+      
+      <div id="login-error" class="alert hidden"></div>
+      
+      <div class="form-group" style="margin-bottom: 24px; text-align: left;">
+        <label class="form-label" style="text-align: center; display: block; font-weight: 600; margin-bottom: 8px;">ACCESS KEY</label>
+        <input 
+          type="text" 
+          id="inp-access-code" 
+          placeholder="SV-XXXXXX" 
+          maxlength="9" 
+          class="short-answer" 
+          style="text-align: center; font-size: 1.5rem; font-family: monospace; letter-spacing: 4px; text-transform: uppercase; font-weight: 700; height: 60px; min-height: 60px;" 
+        />
+      </div>
+
+      <div style="display: flex; flex-direction: column; gap: 8px; width: 100%; max-width: 320px; margin: 0 auto;">
+        <button id="btn-verify-code" class="btn btn-primary btn-lg" style="width: 100%;">
+          Verify & Start Exam →
+        </button>
+        <button id="btn-exit-login" class="btn btn-outline" style="width: 100%; margin-top: 4px; border-color: rgba(239, 68, 68, 0.2); color: var(--red);">
+          ❌ Exit secureVision
+        </button>
+      </div>
+      
+      <p class="hint" style="margin-top: 24px;">🔒 This session will lock down your environment and stream telemetry to your proctor.</p>
+    </div>
+  </div>
+
+  <div id="view-exams" class="view">
+    <div class="exam-container">
+      <div class="top-bar">
+        <div class="logo-sm">🔒 secureVision</div>
+        <div class="user-info">
+          <span id="user-name"></span>
+          <button id="btn-logout" class="btn btn-ghost btn-sm">Sign Out</button>
+        </div>
+      </div>
+      <h2>Available Exams</h2>
+      <div id="exams-list"></div>
+    </div>
+  </div>
+
+  <div id="view-exam" class="view">
+    <!-- Header bar -->
+    <div class="exam-header">
+      <div style="display:flex;align-items:center;gap:12px">
+        <span class="logo-sm">🛡️</span>
+        <span id="exam-title-header" style="font-weight:600"></span>
+      </div>
+      <div style="display:flex;align-items:center;gap:16px">
+        <div id="daemon-dot" class="daemon-dot" title="Security Daemon"></div>
+        <div id="timer" class="timer">00:00</div>
+        <button id="btn-submit-exam" class="btn btn-danger btn-sm">Submit Exam</button>
+      </div>
+    </div>
+
+    <!-- Alert banner for proctoring events -->
+    <div id="exam-alert" class="exam-alert hidden"></div>
+
+    <!-- Progress -->
+    <div class="progress-bar-container">
+      <div id="progress-bar" class="progress-bar" style="width:0%"></div>
+    </div>
+
+    <!-- Question navigation -->
+    <div class="exam-layout">
+      <aside class="question-nav">
+        <div style="flex: 1; overflow-y: auto; margin-bottom: 12px; padding-right: 4px;">
+          <div class="nav-title">Questions</div>
+          <div id="q-nav-buttons"></div>
+        </div>
+        <div class="student-webcam-container" style="border-top: 1px solid var(--border); padding-top: 14px; display: flex; flex-direction: column; gap: 8px;">
+          <div style="font-size: 0.7rem; text-transform: uppercase; letter-spacing: 0.05em; color: var(--muted); font-weight: 600; display: flex; align-items: center; gap: 6px;">
+            <span style="color: var(--green); display: inline-block; width: 6px; height: 6px; border-radius: 50%; background-color: var(--green); box-shadow: 0 0 6px var(--green);"></span> Live Webcam
+          </div>
+          <div style="width: 100%; height: 110px; background: #111; border: 1px solid var(--border); border-radius: 6px; overflow: hidden; position: relative;">
+            <video id="student-webcam-preview" autoplay playsinline muted style="width: 100%; height: 100%; object-fit: cover; transform: scaleX(-1);"></video>
+          </div>
+        </div>
+      </aside>
+
+      <main class="question-area">
+        <div id="question-display"></div>
+      </main>
+    </div>
+  </div>
+
+  <div id="view-submitted" class="view">
+    <div class="screen-center">
+      <div class="logo">✅</div>
+      <h1>Exam Submitted</h1>
+      <p class="subtitle">Your exam has been submitted successfully. <br />You may close this window.</p>
+      <button id="btn-exit-app" class="btn btn-outline" style="margin-top:20px;">Exit secureVision</button>
+      <div id="submission-details" style="margin-top:24px;font-size:0.85rem;color:#7e8fba"></div>
+    </div>
+  </div>
+
+  <div id="view-lockdown" class="view lockdown-view">
+    <div class="screen-center">
+      <div class="logo">🔒</div>
+      <h1>Exam Locked</h1>
+      <p class="subtitle" id="lockdown-reason">A security policy violation has been detected. Your exam has been
+        submitted and flagged for review.</p>
+      <button id="btn-exit-app-lockdown" class="btn btn-danger" style="margin-top:20px;">Exit secureVision</button>
+      <p style="margin-top:24px;font-size:0.8rem;color:#4c5a7e">Session ID: <span id="lockdown-session-id"></span></p>
+    </div>
+  </div>
+
+  <script src="renderer.js"></script>
+</body>
+
+</html>
