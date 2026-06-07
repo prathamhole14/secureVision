@@ -17,11 +17,13 @@ interface StudentEntry {
 }
 
 interface Flag {
+  id?: string;
   ruleId: string;
   severity: string;
   name: string;
   sessionId: string;
   timestamp: string;
+  createdAt?: string;
 }
 
 function TimeElapsed({ joinedAt }: { joinedAt: string }) {
@@ -40,6 +42,23 @@ function TimeElapsed({ joinedAt }: { joinedAt: string }) {
   }, [joinedAt]);
 
   return <span style={{ fontFamily: 'monospace', fontWeight: 600 }}>{elapsed}</span>;
+}
+
+function calculateTrustScore(flags: any[]) {
+  let score = 100;
+  flags.forEach((f) => {
+    const sev = String(f.severity).toUpperCase();
+    if (sev === 'HIGH') score -= 40;
+    else if (sev === 'MEDIUM') score -= 15;
+    else if (sev === 'LOW') score -= 5;
+  });
+  return Math.max(0, score);
+}
+
+function getTrustLabel(score: number) {
+  if (score >= 90) return { label: 'HIGH TRUST', color: 'var(--green)', bg: 'var(--green-bg)' };
+  if (score >= 70) return { label: 'MED SUSPICION', color: 'var(--yellow)', bg: 'var(--yellow-bg)' };
+  return { label: 'HIGH SUSPICION', color: 'var(--red)', bg: 'var(--red-bg)' };
 }
 
 export default function MonitorPage() {
@@ -77,7 +96,7 @@ export default function MonitorPage() {
         let maxPoints: number | undefined;
 
         if (s.flags && s.flags.length > 0) {
-          s.flags.forEach((f: any) => newFlags.push({ ...f, sessionId: s.id }));
+          s.flags.forEach((f: any) => newFlags.push({ ...f, sessionId: s.id, name: f.name || f.notes || f.ruleId }));
         }
 
         const recentEvents = (s.events || []).map((e: any) => {
@@ -116,8 +135,8 @@ export default function MonitorPage() {
       if (newFlags.length > 0) {
         setFlags((prev) => {
           const map = new Map();
-          [...prev, ...newFlags].forEach((f) => map.set(f.sessionId + f.timestamp, f));
-          return Array.from(map.values()).sort((a, b) => new Date(b.timestamp).getTime() - new Date(a.timestamp).getTime());
+          [...prev, ...newFlags].forEach((f) => map.set(f.id || (f.sessionId + (f.timestamp || f.createdAt || '')), f));
+          return Array.from(map.values()).sort((a, b) => new Date(b.timestamp || b.createdAt).getTime() - new Date(a.timestamp || a.createdAt).getTime());
         });
       }
     });
@@ -153,6 +172,9 @@ export default function MonitorPage() {
         if (event.type === 'exam_submitted') {
            newStatus = 'completed';
            if (event.payload) { score = event.payload.score; maxPoints = event.payload.maxPoints; }
+        }
+        if (event.type === 'session_terminated') {
+           newStatus = 'terminated';
         }
 
         return {
@@ -194,6 +216,10 @@ export default function MonitorPage() {
            newStatus = 'completed';
            if (submitted.payload) { score = submitted.payload.score; maxPoints = submitted.payload.maxPoints; }
         }
+        const terminated = events.find((e) => e.type === 'session_terminated');
+        if (terminated) {
+           newStatus = 'terminated';
+        }
 
         return {
           ...prev,
@@ -218,11 +244,65 @@ export default function MonitorPage() {
       });
     });
 
+    socket.on('student:webcam', ({ sessionId, image }: { sessionId: string; image: string }) => {
+      setStudents((prev) => {
+        const s = prev[sessionId];
+        if (!s) return prev;
+        return { ...prev, [sessionId]: { ...s, webcamImage: image } };
+      });
+    });
+
+    socket.on('student:mic-level', ({ sessionId, volume }: { sessionId: string; volume: number }) => {
+      setStudents((prev) => {
+        const s = prev[sessionId];
+        if (!s) return prev;
+        return { ...prev, [sessionId]: { ...s, micVolume: volume } };
+      });
+    });
+
     return () => { socket.disconnect(); };
   }, [examId]);
 
+  const [broadcastMsg, setBroadcastMsg] = useState('');
+
   function sendCommand(sessionId: string, command: string) {
     socketRef.current?.emit('professor:command', { sessionId, command });
+  }
+
+  function handleBroadcast(e: React.FormEvent) {
+    e.preventDefault();
+    if (!broadcastMsg.trim()) return;
+    socketRef.current?.emit('professor:broadcast', { examId, command: 'BROADCAST', message: broadcastMsg.trim() });
+    setBroadcastMsg('');
+    alert('Broadcast message dispatched to all student screens!');
+  }
+
+
+
+  async function handlePenalize(sessionId: string, penalty: number | 'DISQUALIFY') {
+    const reason = penalty === 'DISQUALIFY' 
+      ? 'Disqualify this examinee? This will set their score to 0.' 
+      : `Deduct ${Math.abs(Number(penalty))} mark from this examinee's score?`;
+    if (!confirm(reason)) return;
+    
+    try {
+      const res = await api.post(`/sessions/${sessionId}/penalize`, { penalty });
+      alert('Student score adjusted successfully!');
+      
+      setStudents(prev => {
+        const s = prev[sessionId];
+        if (!s) return prev;
+        return {
+          ...prev,
+          [sessionId]: {
+            ...s,
+            score: res.data.newScore
+          }
+        };
+      });
+    } catch (err: any) {
+      alert(err.response?.data?.error || 'Failed to apply penalty.');
+    }
   }
 
   const studentList = Object.values(students);
@@ -242,6 +322,24 @@ export default function MonitorPage() {
         </div>
       </div>
       <div className="page-body">
+        
+        {/* Broadcast System Message */}
+        <div className="card" style={{ marginBottom: 24, padding: '20px 24px', background: 'linear-gradient(135deg, #1d1d1d 0%, #171717 100%)', border: '1px solid rgba(255,255,255,0.05)' }}>
+          <div className="card-title" style={{ fontSize: '0.85rem', color: 'var(--text-secondary)' }}>📢 Broadcast Proctor Alert</div>
+          <form onSubmit={handleBroadcast} style={{ display: 'flex', gap: 12, marginTop: 8 }}>
+            <input 
+              type="text" 
+              className="form-input" 
+              placeholder="Type a custom message to broadcast to all examinees (e.g. '5 minutes remaining!')..." 
+              value={broadcastMsg}
+              onChange={(e) => setBroadcastMsg(e.target.value)}
+              style={{ flex: 1, height: '42px' }}
+            />
+            <button type="submit" className="btn btn-primary" style={{ padding: '0 24px', height: '42px' }}>
+              Broadcast Message
+            </button>
+          </form>
+        </div>
 
         {/* Recent Flags Feed */}
         {flags.length > 0 && (
@@ -294,25 +392,144 @@ export default function MonitorPage() {
                     <div className="student-name">{s.studentEmail.split('@')[0]}</div>
                     <div className="student-email">{s.studentEmail}</div>
                   </div>
-                  <span className={`badge ${s.status === 'flagged' ? 'badge-red' : s.status === 'warning' ? 'badge-yellow' : 'badge-green'}`}>
-                    {s.status === 'flagged' ? '🚨 FLAGGED' : s.status === 'warning' ? '⚠️ WARN' : '✓ OK'}
+                  <span className={`badge ${
+                    s.status === 'flagged' ? 'badge-red' : 
+                    s.status === 'warning' ? 'badge-yellow' : 
+                    s.status === 'completed' ? 'badge-green' : 
+                    s.status === 'terminated' ? 'badge-red' : 
+                    'badge-green'
+                  }`}>
+                    {s.status === 'flagged' ? '🚨 FLAGGED' : 
+                     s.status === 'warning' ? '⚠️ WARN' : 
+                     s.status === 'completed' ? '✓ SUBMITTED' : 
+                     s.status === 'terminated' ? '🛑 DISQUALIFIED' : 
+                     '✓ ONLINE'}
                   </span>
                 </div>
 
-                {/* Extra Session Info */}
-                <div style={{ display: 'flex', gap: 12, marginBottom: 12, fontSize: '0.75rem', color: 'var(--text-muted)' }}>
-                  <div style={{ display: 'flex', alignItems: 'center', gap: 4 }}>
-                    <span>⏱️</span> Elapsed: {s.status === 'completed' || s.status === 'terminated' ? 'Finished' : <TimeElapsed joinedAt={s.joinedAt} />}
-                  </div>
-                  <div style={{ display: 'flex', alignItems: 'center', gap: 4 }}>
-                    <span>💻</span> OS: {s.platform ? <span style={{ textTransform: 'capitalize', fontWeight: 600 }}>{s.platform}</span> : <i>Detecting...</i>}
-                  </div>
-                  {s.score !== undefined && (
-                    <div style={{ display: 'flex', alignItems: 'center', gap: 4, color: 'var(--green)', fontWeight: 600 }}>
-                      <span>📝</span> Score: {s.score} / {s.maxPoints || '?'}
+                {/* Live Webcam Preview */}
+                {(() => {
+                  const isFinished = s.status === 'completed' || s.status === 'terminated';
+                  return (
+                    <div 
+                      style={{ 
+                        width: '100%', 
+                        height: '140px', 
+                        background: '#111', 
+                        borderRadius: '8px', 
+                        marginBottom: '12px', 
+                        overflow: 'hidden', 
+                        position: 'relative',
+                        border: '1px solid var(--border)'
+                      }}
+                    >
+                      {(s as any).webcamImage ? (
+                        <img 
+                          src={(s as any).webcamImage} 
+                          alt="Student Last Snapshot" 
+                          style={{ 
+                            width: '100%', 
+                            height: '100%', 
+                            objectFit: 'cover', 
+                            filter: isFinished ? 'grayscale(50%) opacity(80%)' : undefined 
+                          }}
+                        />
+                      ) : (
+                        <div 
+                          style={{ 
+                            width: '100%', 
+                            height: '100%', 
+                            display: 'flex', 
+                            flexDirection: 'column', 
+                            alignItems: 'center', 
+                            justifyContent: 'center',
+                            color: 'var(--text-muted)',
+                            fontSize: '0.78rem',
+                            gap: '6px'
+                          }}
+                        >
+                          <span style={{ fontSize: '1.5rem' }}>📷</span>
+                          <span>{isFinished ? 'Exam Ended - No Feed' : 'Camera Feed Connecting...'}</span>
+                        </div>
+                      )}
+                      <span 
+                        style={{ 
+                          position: 'absolute', 
+                          bottom: '8px', 
+                          left: '8px', 
+                          background: 'rgba(0,0,0,0.6)', 
+                          backdropFilter: 'blur(4px)',
+                          padding: '2px 8px', 
+                          borderRadius: '999px', 
+                          fontSize: '0.65rem', 
+                          fontWeight: 600,
+                          color: isFinished ? 'var(--text-secondary)' : (s as any).webcamImage ? 'var(--green)' : 'var(--text-muted)'
+                        }}
+                      >
+                        {isFinished ? '■ OFFLINE' : '● LIVE'}
+                      </span>
                     </div>
-                  )}
+                  );
+                })()}
+
+                {/* Audio volume level */}
+                <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: 12, padding: '6px 10px', background: 'rgba(255,255,255,0.03)', borderRadius: 6, border: '1px solid var(--border)' }}>
+                  <span style={{ fontSize: '0.75rem', fontWeight: 600, color: 'var(--text-secondary)', display: 'flex', alignItems: 'center', gap: 4 }}>🎙️ Volume:</span>
+                  <div style={{ flex: 1, height: 6, background: '#222', borderRadius: 3, overflow: 'hidden' }}>
+                    <div 
+                      style={{ 
+                        height: '100%', 
+                        width: `${Math.min((s as any).micVolume || 0, 100)}%`, 
+                        background: ((s as any).micVolume || 0) > 35 ? 'var(--red)' : ((s as any).micVolume || 0) > 15 ? 'var(--yellow)' : 'var(--green)',
+                        transition: 'width 0.2s ease',
+                        boxShadow: ((s as any).micVolume || 0) > 0 ? `0 0 8px ${((s as any).micVolume || 0) > 35 ? 'var(--red)' : ((s as any).micVolume || 0) > 15 ? 'var(--yellow)' : 'var(--green)'}` : 'none'
+                      }} 
+                    />
+                  </div>
+                  <span style={{ fontFamily: 'monospace', fontSize: '0.72rem', width: 32, textAlign: 'right', fontWeight: 600, color: ((s as any).micVolume || 0) > 35 ? 'var(--red)' : 'var(--text-primary)' }}>
+                    {((s as any).micVolume || 0)}%
+                  </span>
                 </div>
+
+                {/* Extra Session Info & Dynamic Trust Score */}
+                {(() => {
+                  const studentFlags = flags.filter(f => f.sessionId === s.sessionId);
+                  const trust = calculateTrustScore(studentFlags);
+                  const meta = getTrustLabel(trust);
+                  return (
+                    <div style={{ display: 'flex', gap: 12, marginBottom: 12, fontSize: '0.75rem', color: 'var(--text-muted)', flexWrap: 'wrap', alignItems: 'center' }}>
+                      <div style={{ display: 'flex', alignItems: 'center', gap: 4 }}>
+                        <span>⏱️</span> Elapsed: {s.status === 'completed' || s.status === 'terminated' ? 'Finished' : <TimeElapsed joinedAt={s.joinedAt} />}
+                      </div>
+                      <div style={{ display: 'flex', alignItems: 'center', gap: 4 }}>
+                        <span>💻</span> OS: {s.platform ? <span style={{ textTransform: 'capitalize', fontWeight: 600 }}>{s.platform}</span> : <i>Detecting...</i>}
+                      </div>
+                      {s.score !== undefined && (
+                        <div style={{ display: 'flex', alignItems: 'center', gap: 4, color: 'var(--green)', fontWeight: 600 }}>
+                          <span>📝</span> Score: {s.score} / {s.maxPoints || '?'}
+                        </div>
+                      )}
+                      <div 
+                        style={{ 
+                          display: 'inline-flex', 
+                          alignItems: 'center', 
+                          gap: 4, 
+                          background: meta.bg, 
+                          color: meta.color, 
+                          padding: '2px 8px', 
+                          borderRadius: '4px',
+                          fontWeight: 800,
+                          fontSize: '0.7rem',
+                          border: `1px solid ${meta.color}33`,
+                          boxShadow: `0 0 8px ${meta.color}11`
+                        }}
+                        title={`Exam Integrity Rating: ${trust}/100`}
+                      >
+                        🛡️ Trust: {trust}% ({meta.label})
+                      </div>
+                    </div>
+                  );
+                })()}
 
                 {/* Recent Flags */}
                 {(() => {
@@ -351,14 +568,35 @@ export default function MonitorPage() {
                   <button className="btn btn-primary btn-sm" style={{ width: '100%' }} onClick={() => navigate(`/reports/${s.sessionId}`)}>
                     📄 View Full Report
                   </button>
-                  <div style={{ display: 'flex', gap: 6 }}>
-                    <button className="btn btn-danger btn-sm" style={{ flex: 1 }} onClick={() => sendCommand(s.sessionId, 'FORCE_SUBMIT')}>
-                      Force Submit
-                    </button>
-                    <button className="btn btn-outline btn-sm" style={{ flex: 1 }} onClick={() => sendCommand(s.sessionId, 'WARN')}>
-                      Warn
-                    </button>
-                  </div>
+                  
+                  {s.status === 'completed' || s.status === 'terminated' ? (
+                    <div style={{ display: 'flex', gap: 6, marginTop: 4 }}>
+                      <button 
+                        className="btn btn-outline btn-sm" 
+                        style={{ flex: 1, borderColor: 'rgba(245, 158, 11, 0.4)', color: 'var(--yellow)', fontSize: '0.78rem' }} 
+                        onClick={() => handlePenalize(s.sessionId, -1)}
+                      >
+                        ⚠️ Deduct 1 Mark
+                      </button>
+                      <button 
+                        className="btn btn-outline btn-sm" 
+                        style={{ flex: 1, borderColor: 'rgba(239, 68, 68, 0.4)', color: 'var(--red)', fontSize: '0.78rem' }} 
+                        onClick={() => handlePenalize(s.sessionId, 'DISQUALIFY')}
+                      >
+                        🚫 Disqualify
+                      </button>
+                    </div>
+                  ) : (
+                    <>
+                      <button className="btn btn-outline btn-sm" style={{ width: '100%' }} onClick={() => sendCommand(s.sessionId, 'WARN')}>
+                        ⚠️ Warn
+                      </button>
+                      
+                      <button className="btn btn-danger btn-sm" style={{ width: '100%' }} onClick={() => sendCommand(s.sessionId, 'FORCE_SUBMIT')}>
+                        🛑 Force Submit Exam
+                      </button>
+                    </>
+                  )}
                 </div>
               </div>
             ))}

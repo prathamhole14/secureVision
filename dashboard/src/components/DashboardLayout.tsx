@@ -1,10 +1,7 @@
 import { Outlet, NavLink, useNavigate } from 'react-router-dom';
 import { useAuth } from '../contexts/AuthContext';
 
-const NAV_ITEMS = [
-  { icon: '🏠', label: 'Home', to: '/' },
-  { icon: '📝', label: 'Exams', to: '/exams' },
-];
+
 
 export default function DashboardLayout() {
   const { user, logout } = useAuth();
@@ -15,17 +12,30 @@ export default function DashboardLayout() {
     navigate('/login');
   }
 
+  const isStudent = user?.role === 'STUDENT';
+
+  const navItems = isStudent 
+    ? [
+        { icon: '🎓', label: 'Student Portal', to: '/' },
+        { icon: '🏫', label: 'Classes', to: '/classes' },
+      ]
+    : [
+        { icon: '🏠', label: 'Home', to: '/' },
+        { icon: '📝', label: 'Exams', to: '/exams' },
+        { icon: '🏫', label: 'Classes', to: '/classes' },
+      ];
+
   return (
     <div className="app-layout">
       <aside className="sidebar">
         <div className="sidebar-logo">
           <h2>🔒 secureVision</h2>
           <div style={{ fontSize: '0.75rem', color: 'var(--text-muted)', marginTop: 4 }}>
-            Professor Dashboard
+            {isStudent ? 'Student Portal' : 'Professor Dashboard'}
           </div>
         </div>
         <nav className="sidebar-nav">
-          {NAV_ITEMS.map((item) => (
+          {navItems.map((item) => (
             <NavLink
               key={item.to}
               to={item.to}

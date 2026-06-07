@@ -30,7 +30,7 @@ async function main() {
   const examConfig = {
     policy: {
       lowSeverityAction: 'warn',
-      mediumSeverityAction: 'pause',
+      mediumSeverityAction: 'warn',
       highSeverityAction: 'submit',
     },
     questions: [

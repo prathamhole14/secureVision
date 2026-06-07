@@ -2,6 +2,7 @@ import { useEffect, useState } from 'react';
 import { useNavigate } from 'react-router-dom';
 import api from '../lib/api';
 import { useAuth } from '../contexts/AuthContext';
+import StudentPortal from './StudentPortal';
 
 interface Exam {
   id: string;
@@ -16,6 +17,11 @@ export default function HomePage() {
   const [exams, setExams] = useState<Exam[]>([]);
   const [loading, setLoading] = useState(true);
   const navigate = useNavigate();
+
+  // If student role, bypass the entire professor dashboard view
+  if (user?.role === 'STUDENT') {
+    return <StudentPortal />;
+  }
 
   useEffect(() => {
     api.get('/exams').then((r) => setExams(r.data.exams)).finally(() => setLoading(false));
