@@ -7,22 +7,12 @@ import ExamsPage from './pages/ExamsPage';
 import MonitorPage from './pages/MonitorPage';
 import ReportPage from './pages/ReportPage';
 import QuestionsPage from './pages/QuestionsPage';
+import ClassesPage from './pages/ClassesPage';
 
 function ProtectedRoute({ children }: { children: React.ReactNode }) {
   const { user, loading } = useAuth();
   if (loading) return <div className="login-page"><div className="spinner" /></div>;
   if (!user) return <Navigate to="/login" replace />;
-  if (user.role !== 'PROFESSOR' && user.role !== 'ADMIN') {
-    return (
-      <div className="login-page">
-        <div className="login-card">
-          <div className="logo-icon">🚫</div>
-          <h1>Access Denied</h1>
-          <p>This dashboard is for professors and administrators only.</p>
-        </div>
-      </div>
-    );
-  }
   return <>{children}</>;
 }
 
@@ -45,6 +35,7 @@ export default function App() {
             <Route path="exams/:examId/questions" element={<QuestionsPage />} />
             <Route path="monitor/:examId" element={<MonitorPage />} />
             <Route path="reports/:sessionId" element={<ReportPage />} />
+            <Route path="classes" element={<ClassesPage />} />
           </Route>
           <Route path="*" element={<Navigate to="/" replace />} />
         </Routes>

@@ -5,7 +5,7 @@
   "main": "dist/main.js",
   "scripts": {
     "dev": "npm run build && electron dist/main.js --no-sandbox",
-    "build": "esbuild src/main.ts --bundle --platform=node --external:electron --outfile=dist/main.js",
+    "build": "esbuild src/main.ts --bundle --platform=node --external:electron --outfile=dist/main.js && esbuild src/preload.ts --bundle --platform=node --external:electron --outfile=dist/preload.js",
     "start": "electron dist/main.js --no-sandbox",
     "package": "electron-builder"
   },

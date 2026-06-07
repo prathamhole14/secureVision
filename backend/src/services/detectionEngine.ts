@@ -36,11 +36,14 @@ const RULES: Array<{
     name: 'Blacklisted process running during exam',
     severity: 'MEDIUM',
     confidence: 0.85,
-    match: (e) =>
-      e.type === 'process_detected' &&
-      BLACKLISTED_PROCESSES.includes(
-        String((e.payload as Record<string, unknown>).process || '').toLowerCase()
-      ),
+    match: (e) => {
+      if (e.type !== 'process_detected') return false;
+      const proc = String((e.payload as Record<string, unknown>).process || '').toLowerCase();
+      const cleanProc = proc.trim().replace(/\.exe$/, '');
+      return BLACKLISTED_PROCESSES.some((bl) => {
+        return cleanProc === bl || cleanProc.includes(`/${bl}`) || cleanProc.includes(`\\${bl}`) || cleanProc.includes(bl);
+      });
+    },
   },
   {
     id: 'FOCUS_LOSS',
@@ -111,6 +114,28 @@ class DetectionEngine {
     rule: (typeof RULES)[number],
     event: TelemetryEvent
   ) {
+    let notes = rule.name;
+    if (rule.id === 'BLACKLISTED_PROCESS' && event.payload?.process) {
+      notes = `Blacklisted process: ${event.payload.process}`;
+    }
+
+    // Deduplication check: prevent triplicated identical flags within 3 seconds of each other
+    // For BLACKLISTED_PROCESS, we deduplicate per specific process name (in the notes field)
+    const recentFlag = await prisma.flag.findFirst({
+      where: {
+        sessionId,
+        ruleId: rule.id,
+        notes: rule.id === 'BLACKLISTED_PROCESS' ? notes : undefined,
+        createdAt: {
+          gte: new Date(Date.now() - 3000), // last 3 seconds
+        },
+      },
+    });
+    if (recentFlag) {
+      logger.info(`🚩 [Deduplication] Prevented duplicate flag [${rule.id}] - ${notes} for session ${sessionId}`);
+      return;
+    }
+
     // Find event record
     const dbEvent = await prisma.event.findFirst({
       where: { sessionId, type: event.type },
@@ -124,12 +149,12 @@ class DetectionEngine {
         ruleId: rule.id,
         confidence: rule.confidence,
         severity: rule.severity,
-        notes: rule.name,
+        notes: notes,
       },
     });
 
     logger.warn(
-      `🚩 FLAG [${rule.severity}] session=${sessionId} rule=${rule.id} conf=${rule.confidence}`
+      `🚩 FLAG [${rule.severity}] session=${sessionId} rule=${rule.id} conf=${rule.confidence} - ${notes}`
     );
 
     // Get examId for broadcasting to professor
@@ -146,7 +171,7 @@ class DetectionEngine {
             ruleId: rule.id,
             severity: rule.severity,
             confidence: rule.confidence,
-            name: rule.name,
+            name: notes,
             eventType: event.type,
             timestamp: event.timestamp,
           },

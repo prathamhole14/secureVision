@@ -141,6 +141,23 @@ export function initSocketIO(httpServer: HttpServer) {
         });
         logger.info(`Professor issued "${command}" to session ${sessionId}`);
       }
+      );
+    // Professor broadcasts a message to all students in this exam
+    socket.on(
+      'professor:broadcast',
+      ({ examId, command, message }: { examId: string; command: string; message: string }) => {
+        if (user.role !== 'PROFESSOR') {
+          socket.emit('error', { message: 'Forbidden' });
+          return;
+        }
+        examNs.to(`exam:${examId}`).emit('server:command', {
+          command,
+          message,
+          issuedAt: new Date(),
+          issuedBy: user.email,
+        });
+        logger.info(`Professor broadcasted "${command}" (msg: "${message}") to exam ${examId}`);
+      }
     );
 
     // Real-time single telemetry event from client (low-latency path)
@@ -168,6 +185,26 @@ export function initSocketIO(httpServer: HttpServer) {
         studentId: user.id,
         event,
         receivedAt: new Date(),
+      });
+    });
+
+    // Receive webcam frame from student and forward to proctor monitor
+    socket.on('student:webcam', async ({ sessionId, image }: { sessionId: string; image: string }) => {
+      const session = await prisma.session.findUnique({ where: { id: sessionId } });
+      if (!session || session.userId !== user.id) return;
+      examNs.to(`professor:${session.examId}`).emit('student:webcam', {
+        sessionId,
+        image,
+      });
+    });
+
+    // Receive mic level from student and forward to proctor monitor
+    socket.on('student:mic-level', async ({ sessionId, volume }: { sessionId: string; volume: number }) => {
+      const session = await prisma.session.findUnique({ where: { id: sessionId } });
+      if (!session || session.userId !== user.id) return;
+      examNs.to(`professor:${session.examId}`).emit('student:mic-level', {
+        sessionId,
+        volume,
       });
     });
 
