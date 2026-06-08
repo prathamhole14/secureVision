@@ -62,7 +62,7 @@ h1 { font-family: var(--heading); font-size: 2rem; margin-bottom: 10px; }
 .progress-bar-container { height: 3px; background: rgba(255,255,255,.08); }
 .progress-bar { height: 100%; background: var(--accent); transition: width .3s; }
 .exam-layout { display: flex; flex: 1; overflow: hidden; }
-.question-nav { width: 200px; background: var(--surface); border-right: 1px solid var(--border); padding: 20px 12px; display: flex; flex-direction: column; justify-content: space-between; flex-shrink: 0; }
+.question-nav { width: 200px; background: var(--surface); border-right: 1px solid var(--border); padding: 20px 12px; overflow-y: auto; flex-shrink: 0; }
 .nav-title { font-size: .75rem; text-transform: uppercase; letter-spacing: .06em; color: var(--muted); margin-bottom: 12px; }
 .q-nav-btn { display: block; width: 100%; text-align: left; padding: 8px 12px; border-radius: 6px; font-size: .8rem; font-weight: 500; cursor: pointer; border: none; background: transparent; color: var(--muted); font-family: var(--font); margin-bottom: 4px; transition: all .15s; }
 .q-nav-btn:hover { background: rgba(255,255,255,.07); color: var(--text); }

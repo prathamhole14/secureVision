@@ -399,7 +399,7 @@ async fn check_process_list(tx: &broadcast::Sender<TelemetryEvent>) {
     let blacklist = [
         "anydesk", "teamviewer", "vncviewer", "vncserver", "xrdp",
         "obs64", "obs32", "obs", "obs-studio", "discord",
-        "screenconnect", "logmein", "ammyy", "remotepc", "telegram", "whatsapp",
+        "screenconnect", "logmein", "ammyy", "remotepc",
     ];
 
     // Linux: read /proc filesystem
