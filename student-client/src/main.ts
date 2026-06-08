@@ -134,7 +134,7 @@ function createWindow() {
   mainWindow?.webContents.on('before-input-event', (event: any, input: any) => {
     const isControlOrCmd = input.control || input.meta;
     const key = input.key.toLowerCase();
-    
+
     const blockedShortcuts = [
       key === 'f5',
       key === 'r' && isControlOrCmd,
