@@ -39,3 +39,8 @@ Thumbs.db
 
 # Typescript
 *.tsbuildinfo
+
+# Rust build target directories
+target/
+**/target/
+
