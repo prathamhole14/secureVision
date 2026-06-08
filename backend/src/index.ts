@@ -14,7 +14,6 @@ import sessionRoutes from './routes/sessions';
 import telemetryRoutes from './routes/telemetry';
 import reportRoutes from './routes/reports';
 import evidenceRoutes from './routes/evidence';
-import classroomRoutes from './routes/classrooms';
 import { logger } from './utils/logger';
 
 const app = express();
@@ -68,7 +67,6 @@ app.use('/api/sessions', sessionRoutes);
 app.use('/api/telemetry', telemetryRoutes);
 app.use('/api/reports', reportRoutes);
 app.use('/api/evidence', evidenceRoutes);
-app.use('/api/classrooms', classroomRoutes);
 
 // Health check
 app.get('/health', (_req, res) => {

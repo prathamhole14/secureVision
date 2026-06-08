@@ -1,6 +1,6 @@
-C:\Users\91895\OneDrive\Documents\Mini project sem6\secureVision-main\security-daemon\target\release\deps\anticheat_daemon.d: src\main.rs
+C:\Users\Prince\Documents\New folder\secureVision\security-daemon\target\release\deps\anticheat_daemon.d: src\main.rs
 
-C:\Users\91895\OneDrive\Documents\Mini project sem6\secureVision-main\security-daemon\target\release\deps\anticheat_daemon.exe: src\main.rs
+C:\Users\Prince\Documents\New folder\secureVision\security-daemon\target\release\deps\anticheat_daemon.exe: src\main.rs
 
 src\main.rs:
 

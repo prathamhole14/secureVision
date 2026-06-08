@@ -31,16 +31,12 @@ export default function ExamsPage() {
     title: '',
     duration: '90',
     lowSeverityAction: 'warn',
-    mediumSeverityAction: 'warn',
+    mediumSeverityAction: 'pause',
     highSeverityAction: 'submit',
   });
 
-  const [classroomsList, setClassroomsList] = useState<any[]>([]);
-  const [selectedClassrooms, setSelectedClassrooms] = useState<string[]>([]);
-
   useEffect(() => {
     fetchExams();
-    api.get('/classrooms').then((res) => setClassroomsList(res.data.classrooms || [])).catch(() => {});
   }, []);
 
   async function fetchExams() {
@@ -58,7 +54,6 @@ export default function ExamsPage() {
       await api.post('/exams', {
         title: form.title,
         duration: parseInt(form.duration),
-        classrooms: selectedClassrooms,
         config: {
           questions: [],
           policy: {
@@ -71,8 +66,7 @@ export default function ExamsPage() {
         },
       });
       setShowModal(false);
-      setForm({ title: '', duration: '90', lowSeverityAction: 'warn', mediumSeverityAction: 'warn', highSeverityAction: 'submit' });
-      setSelectedClassrooms([]);
+      setForm({ title: '', duration: '90', lowSeverityAction: 'warn', mediumSeverityAction: 'pause', highSeverityAction: 'submit' });
       fetchExams();
     } catch (e: any) {
       setError(e.response?.data?.error || 'Failed to create exam');
@@ -193,39 +187,11 @@ export default function ExamsPage() {
                 />
               </div>
 
-              <div className="form-group" style={{ marginTop: 16 }}>
-                <label className="form-label" style={{ display: 'flex', alignItems: 'center', gap: 6 }}>🏫 Assign to Classes / Batches</label>
-                {classroomsList.length === 0 ? (
-                  <p style={{ fontSize: '0.8rem', color: 'var(--text-muted)', margin: 0, padding: '4px 0' }}>
-                    No classes created yet. You can assign this exam to classes later.
-                  </p>
-                ) : (
-                  <div style={{ display: 'flex', flexDirection: 'column', gap: 8, maxHeight: 110, overflowY: 'auto', background: 'rgba(255,255,255,0.01)', padding: 12, borderRadius: 6, border: '1px solid var(--border)' }}>
-                    {classroomsList.map((c) => (
-                      <label key={c.id} style={{ display: 'flex', alignItems: 'center', gap: 8, fontSize: '0.85rem', cursor: 'pointer', userSelect: 'none' }}>
-                        <input
-                          type="checkbox"
-                          checked={selectedClassrooms.includes(c.id)}
-                          onChange={(e) => {
-                            if (e.target.checked) {
-                              setSelectedClassrooms([...selectedClassrooms, c.id]);
-                            } else {
-                              setSelectedClassrooms(selectedClassrooms.filter((id) => id !== c.id));
-                            }
-                          }}
-                        />
-                        <span>{c.name} <span style={{ fontSize: '0.72rem', color: 'var(--text-muted)' }}>({c.code})</span></span>
-                      </label>
-                    ))}
-                  </div>
-                )}
-              </div>
-
               <div style={{ borderTop: '1px solid var(--border)', paddingTop: 20, marginBottom: 20 }}>
                 <div className="card-title" style={{ marginBottom: 16 }}>Anti-Cheat Policy</div>
                 {[
                   { key: 'lowSeverityAction', label: '🟡 Low Severity Action', options: ['warn', 'log'] },
-                  { key: 'mediumSeverityAction', label: '🟠 Medium Severity Action', options: ['warn'] },
+                  { key: 'mediumSeverityAction', label: '🟠 Medium Severity Action', options: ['pause', 'warn'] },
                   { key: 'highSeverityAction', label: '🔴 High Severity Action', options: ['submit', 'lock'] },
                 ].map((row) => (
                   <div className="form-group" key={row.key}>

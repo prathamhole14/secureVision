@@ -8,7 +8,7 @@ import { z } from 'zod';
 const router = Router();
 
 const TelemetryEventSchema = z.object({
-  timestamp: z.string().datetime({ offset: true }),
+  timestamp: z.string().datetime(),
   type: z.string().min(1),
   payload: z.record(z.unknown()).default({}),
   severity: z.enum(['LOW', 'MEDIUM', 'HIGH']).default('LOW'),
