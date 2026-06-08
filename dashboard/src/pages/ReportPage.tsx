@@ -22,6 +22,23 @@ interface SessionReport {
   };
 }
 
+function calculateTrustScore(flags: any[]) {
+  let score = 100;
+  flags.forEach((f) => {
+    const sev = String(f.severity).toUpperCase();
+    if (sev === 'HIGH') score -= 40;
+    else if (sev === 'MEDIUM') score -= 15;
+    else if (sev === 'LOW') score -= 5;
+  });
+  return Math.max(0, score);
+}
+
+function getTrustLabel(score: number) {
+  if (score >= 90) return { label: 'HIGH TRUST', color: 'var(--green)', bg: 'var(--green-bg)' };
+  if (score >= 70) return { label: 'MED SUSPICION', color: 'var(--yellow)', bg: 'var(--yellow-bg)' };
+  return { label: 'HIGH SUSPICION', color: 'var(--red)', bg: 'var(--red-bg)' };
+}
+
 export default function ReportPage() {
   const { sessionId } = useParams<{ sessionId: string }>();
   const navigate = useNavigate();
@@ -69,24 +86,43 @@ export default function ReportPage() {
         </div>
 
         {/* Stats */}
-        <div className="stat-grid" style={{ marginBottom: 20 }}>
-          <div className="stat-card">
-            <div className="stat-value">{summary.totalEvents}</div>
-            <div className="stat-label">Total Events</div>
-          </div>
-          <div className="stat-card">
-            <div className="stat-value" style={{ color: 'var(--red)' }}>{summary.highSeverityFlags}</div>
-            <div className="stat-label">High Severity Flags</div>
-          </div>
-          <div className="stat-card">
-            <div className="stat-value" style={{ color: 'var(--yellow)' }}>{summary.mediumSeverityFlags}</div>
-            <div className="stat-label">Medium Severity Flags</div>
-          </div>
-          <div className="stat-card">
-            <div className="stat-value">{summary.artifactCount}</div>
-            <div className="stat-label">Artifacts</div>
-          </div>
-        </div>
+        {(() => {
+          const trust = calculateTrustScore(session.flags || []);
+          const meta = getTrustLabel(trust);
+          return (
+            <div className="stat-grid" style={{ marginBottom: 20 }}>
+              <div className="stat-card">
+                <div className="stat-value">{summary.totalEvents}</div>
+                <div className="stat-label">Total Events</div>
+              </div>
+              <div className="stat-card">
+                <div className="stat-value" style={{ color: 'var(--red)' }}>{summary.highSeverityFlags}</div>
+                <div className="stat-label">High Severity Flags</div>
+              </div>
+              <div className="stat-card">
+                <div className="stat-value" style={{ color: 'var(--yellow)' }}>{summary.mediumSeverityFlags}</div>
+                <div className="stat-label">Medium Severity Flags</div>
+              </div>
+              <div className="stat-card">
+                <div className="stat-value">{summary.artifactCount}</div>
+                <div className="stat-label">Artifacts</div>
+              </div>
+              <div 
+                className="stat-card pulsing" 
+                style={{ 
+                  background: 'linear-gradient(135deg, rgba(255,255,255,0.01) 0%, rgba(255,255,255,0.03) 100%)',
+                  borderColor: meta.color,
+                  boxShadow: `0 0 15px ${meta.color}22`
+                }}
+              >
+                <div className="stat-value" style={{ color: meta.color }}>{trust}%</div>
+                <div className="stat-label" style={{ fontWeight: 700, color: meta.color }}>
+                  🛡️ {meta.label}
+                </div>
+              </div>
+            </div>
+          );
+        })()}
 
         {/* Tabs */}
         <div style={{ display: 'flex', gap: 8, marginBottom: 16 }}>

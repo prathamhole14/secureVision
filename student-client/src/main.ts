@@ -1,5 +1,5 @@
 // @ts-ignore
-const { app, BrowserWindow, ipcMain, shell } = require('electron');
+const { app, BrowserWindow, ipcMain, shell, Menu } = require('electron');
 import * as path from 'path';
 import { spawn, ChildProcess } from 'child_process';
 import * as net from 'net';
@@ -130,6 +130,35 @@ function createWindow() {
     }
   });
 
+  // Intercept standard developer and reload shortcut keys at Electron layer
+  mainWindow?.webContents.on('before-input-event', (event: any, input: any) => {
+    const isControlOrCmd = input.control || input.meta;
+    const key = input.key.toLowerCase();
+
+    const blockedShortcuts = [
+      key === 'f5',
+      key === 'r' && isControlOrCmd,
+      key === 'f12',
+      key === 'i' && isControlOrCmd && input.shift,
+      key === 'f11',
+    ];
+
+    if (blockedShortcuts.some(Boolean)) {
+      event.preventDefault();
+      console.log(`[Security] Blocked shortcut key in kiosk mode: ${input.key}`);
+    }
+  });
+
+  // Main process level focus loss tracking as bulletproof fallback
+  mainWindow?.on('blur', () => {
+    mainWindow?.webContents.send('daemon:event', {
+      type: 'focus_loss',
+      severity: 'LOW',
+      timestamp: new Date().toISOString(),
+      payload: { source: 'electron_main' }
+    });
+  });
+
   const indexPath = path.join(__dirname, '..', 'src', 'ui', 'index.html');
   mainWindow?.loadFile(indexPath);
 
@@ -141,11 +170,19 @@ function createWindow() {
 
 // --- IPC Handlers ---
 ipcMain.handle('daemon:start-protection', async (_event: any, sessionKey: string) => {
+  if (mainWindow) {
+    mainWindow.setContentProtection(true); // DRM active: prevents screenshotting & capture
+    console.log('[DRM] Content protection active.');
+  }
   sendToDaemon({ command: 'start_protection', sessionKey });
   return { ok: true };
 });
 
 ipcMain.handle('daemon:stop-protection', async () => {
+  if (mainWindow) {
+    mainWindow.setContentProtection(false);
+    console.log('[DRM] Content protection disabled.');
+  }
   sendToDaemon({ command: 'stop_protection' });
   return { ok: true };
 });
@@ -168,10 +205,13 @@ ipcMain.handle('app:request-fullscreen', async () => {
 });
 
 ipcMain.handle('app:close', async () => {
-  if (daemonProcess) {
-    daemonProcess.kill();
-  }
-  app.exit(0);
+  setTimeout(() => {
+    if (daemonProcess) {
+      daemonProcess.kill();
+    }
+    app.exit(0);
+  }, 100);
+  return { ok: true };
 });
 
 // Soft JS-level blur detection reported to daemon bridge
@@ -184,6 +224,25 @@ ipcMain.on('renderer:focus-event', (_event: any, data: any) => {
   });
 });
 
+function createApplicationMenu() {
+  const template = [
+    {
+      label: 'Edit',
+      submenu: [
+        { role: 'undo' },
+        { role: 'redo' },
+        { type: 'separator' },
+        { role: 'cut' },
+        { role: 'copy' },
+        { role: 'paste' },
+        { role: 'selectAll' }
+      ]
+    }
+  ];
+  const menu = Menu.buildFromTemplate(template as any);
+  Menu.setApplicationMenu(menu);
+}
+
 // --- App lifecycle ---
 app.whenReady().then(() => {
   // In dev mode, allow loading cross-origin resources (backend socket.io.js etc.)
@@ -192,6 +251,7 @@ app.whenReady().then(() => {
   }
 
   createWindow();
+  createApplicationMenu();
   launchDaemon();
 
   app.on('activate', () => {

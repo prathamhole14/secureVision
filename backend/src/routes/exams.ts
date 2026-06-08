@@ -10,6 +10,7 @@ const CreateExamSchema = z.object({
   title: z.string().min(1).max(200),
   duration: z.number().int().positive(),
   startTime: z.string().datetime().optional(),
+  classrooms: z.array(z.string()).optional(),
   config: z.object({
     questions: z.array(z.record(z.unknown())),
     policy: z.object({
@@ -60,6 +61,16 @@ router.post(
         configJson: JSON.stringify(body.data.config),
       },
     });
+
+    if (body.data.classrooms && body.data.classrooms.length > 0) {
+      await prisma.classroomExam.createMany({
+        data: body.data.classrooms.map((classroomId) => ({
+          classroomId,
+          examId: exam.id,
+        })),
+      });
+    }
+
     res.status(201).json({ exam });
   }
 );
@@ -147,7 +158,7 @@ router.put(
     try {
       config = JSON.parse(exam.configJson as string) as Record<string, unknown>;
     } catch {
-      config = { policy: { lowSeverityAction: 'warn', mediumSeverityAction: 'pause', highSeverityAction: 'submit' } };
+      config = { policy: { lowSeverityAction: 'warn', mediumSeverityAction: 'warn', highSeverityAction: 'submit' } };
     }
     config.questions = questions;
     config.totalPoints = questions.reduce((sum: number, q: Record<string, unknown>) => sum + ((q.points as number) || 0), 0);

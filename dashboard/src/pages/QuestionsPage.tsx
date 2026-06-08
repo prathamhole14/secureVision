@@ -12,7 +12,7 @@ interface Question {
   text: string;
   points: number;
   options?: string[];
-  answer?: number; // index for MCQ
+  answer?: number | string; // index for MCQ, string for Short Answer
 }
 
 interface Exam {
@@ -33,6 +33,7 @@ const blankShort = (): Omit<Question, 'id'> => ({
   type: 'short_answer',
   text: '',
   points: 1,
+  answer: '',
 });
 
 function newId() {
@@ -85,12 +86,17 @@ export default function QuestionsPage() {
   function handleAddQuestion() {
     if (!newQ.text.trim()) return;
     
+    if (newQ.type === 'short_answer' && !String(newQ.answer || '').trim()) {
+      setError('Please provide the correct answer for the short answer question.');
+      return;
+    }
+
     let processedQ = { ...newQ, id: newId() };
 
     if (newQ.type === 'multiple_choice') {
       // Find the original correct option text
       const originalOptions = newQ.options || [];
-      const correctOptionText = originalOptions[newQ.answer || 0] || '';
+      const correctOptionText = originalOptions[typeof newQ.answer === 'number' ? newQ.answer : 0] || '';
 
       // Filter out empty options
       const filteredOpts = originalOptions.filter((o) => o.trim() !== '');
@@ -231,6 +237,22 @@ export default function QuestionsPage() {
                             ))}
                           </div>
                         )}
+                        {q.type === 'short_answer' && (
+                          <div
+                            style={{
+                              fontSize: '0.82rem',
+                              padding: '6px 12px',
+                              borderRadius: 6,
+                              background: 'var(--green-bg)',
+                              color: 'var(--green)',
+                              border: '1px solid rgba(34,211,165,0.3)',
+                              display: 'inline-block',
+                              marginTop: 4,
+                            }}
+                          >
+                            Correct Answer: <b>{q.answer}</b>
+                          </div>
+                        )}
                       </div>
                       <button
                         className="btn btn-danger btn-sm"
@@ -320,6 +342,24 @@ export default function QuestionsPage() {
                   </p>
                 </div>
               </>
+            )}
+            
+            {/* Short Answer correct answer */}
+            {addType === 'short_answer' && (
+              <div className="form-group">
+                <label className="form-label">Correct Answer *</label>
+                <input
+                  type="text"
+                  className="form-input"
+                  placeholder="Enter the correct answer..."
+                  value={newQ.answer as string || ''}
+                  onChange={(e) => setNewQ({ ...newQ, answer: e.target.value })}
+                  required
+                />
+                <p style={{ fontSize: '0.75rem', color: 'var(--text-muted)', marginTop: 4 }}>
+                  Case-insensitive exact match will be used for auto-grading.
+                </p>
+              </div>
             )}
 
             <button

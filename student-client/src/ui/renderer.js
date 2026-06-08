@@ -19,6 +19,7 @@ let state = {
   remainingSeconds: 0,
   telemetryQueue: [],
   socketConnected: false,
+  examStarted: false,
 };
 let socket = null;
 
@@ -70,7 +71,7 @@ window.electronAPI.onDaemonEvent((event) => {
   }
 });
 
-window.electronAPI.onServerCommand((cmd) => {
+function handleServerCommand(cmd) {
   console.log('[Server Command]', cmd);
   if (cmd.command === 'FORCE_SUBMIT') {
     submitExam('Forced submission by professor');
@@ -79,13 +80,52 @@ window.electronAPI.onServerCommand((cmd) => {
     queueTelemetry({ type: 'server_warn_received', severity: 'LOW', timestamp: new Date().toISOString(), payload: {} });
   } else if (cmd.command === 'LOCK') {
     lockdown('Exam locked by professor.');
+  } else if (cmd.command === 'BROADCAST') {
+    showBroadcastMessage(cmd.message || 'No message content');
+    queueTelemetry({ type: 'broadcast_received', severity: 'LOW', timestamp: new Date().toISOString(), payload: { message: cmd.message } });
   }
+}
+
+window.electronAPI.onServerCommand((cmd) => {
+  handleServerCommand(cmd);
 });
+
+function showBroadcastMessage(msg) {
+  const toast = document.createElement('div');
+  toast.style = 'position:fixed;top:40px;left:50%;transform:translateX(-50%);background:rgba(26,26,26,0.95);border:1px solid rgba(255,255,255,0.12);backdrop-filter:blur(10px);padding:18px 30px;border-radius:12px;box-shadow:0 12px 40px rgba(0,0,0,0.8);z-index:999999;display:flex;align-items:center;gap:16px;animation:slideDown 0.35s cubic-bezier(0.16, 1, 0.3, 1);color:#fff;max-width:550px;min-width:320px;';
+  toast.innerHTML = `
+    <div style="font-size:2rem;filter:drop-shadow(0 0 10px rgba(255,255,255,0.2))">📢</div>
+    <div>
+      <div style="font-size:0.7rem;text-transform:uppercase;letter-spacing:0.08em;color:var(--muted,#9a9a9a);font-weight:700;">Broadcast from Proctor</div>
+      <div style="font-size:1.05rem;font-weight:600;margin-top:4px;line-height:1.4;">${msg}</div>
+    </div>
+  `;
+  document.body.appendChild(toast);
+  
+  if (!document.getElementById('broadcast-style-tag')) {
+    const style = document.createElement('style');
+    style.id = 'broadcast-style-tag';
+    style.innerHTML = `
+      @keyframes slideDown {
+        from { transform: translate(-50%, -60px); opacity: 0; }
+        to { transform: translate(-50%, 0); opacity: 1; }
+      }
+    `;
+    document.head.appendChild(style);
+  }
+  
+  setTimeout(() => {
+    toast.style.transition = 'all 0.5s cubic-bezier(0.16, 1, 0.3, 1)';
+    toast.style.opacity = '0';
+    toast.style.transform = 'translate(-50%, -20px)';
+    setTimeout(() => toast.remove(), 600);
+  }, 9000);
+}
 
 // === Soft Sensors (JS level) ===
 window.addEventListener('blur', () => {
   window.electronAPI.reportFocusEvent('blur');
-  queueTelemetry({ type: 'focus_loss', severity: 'LOW', timestamp: new Date().toISOString(), payload: {} });
+  // focus_loss event is natively captured by Electron Main and the Daemon to prevent triplicated flags
   showAlert('Please return to the exam window!', 'warn');
 });
 
@@ -100,6 +140,11 @@ document.addEventListener('visibilitychange', () => {
 });
 
 document.addEventListener('keydown', (e) => {
+  if (!state.examStarted) return;
+  if (state.paused) {
+    e.preventDefault();
+    return;
+  }
   // Intercept common cheating shortcuts
   const blocked = [
     e.metaKey && e.key === 'c', // Cmd+C (copy)
@@ -115,9 +160,15 @@ document.addEventListener('keydown', (e) => {
   }
 });
 
-document.addEventListener('contextmenu', (e) => e.preventDefault());
-document.addEventListener('copy', (e) => e.preventDefault());
-document.addEventListener('paste', (e) => e.preventDefault());
+document.addEventListener('contextmenu', (e) => {
+  if (state.examStarted) e.preventDefault();
+});
+document.addEventListener('copy', (e) => {
+  if (state.examStarted) e.preventDefault();
+});
+document.addEventListener('paste', (e) => {
+  if (state.examStarted) e.preventDefault();
+});
 
 // === Policy Enforcement ===
 function applyPolicy(severity) {
@@ -127,8 +178,8 @@ function applyPolicy(severity) {
     if (action === 'submit') submitExam('High-severity violation');
     else if (action === 'lock') lockdown('Security violation detected.');
   } else if (severity === 'MEDIUM') {
-    const action = policy.mediumSeverityAction || 'warn';
-    if (action === 'pause') showAlert('Exam paused — contact your proctor to continue.', 'error');
+    // Completely map pause/warn actions to standard warnings to avoid overlays
+    showAlert('⚠️ Security Alert: Please comply with the exam rules!', 'warn');
   }
 }
 
@@ -137,6 +188,8 @@ function lockdown(reason) {
   document.getElementById('lockdown-session-id').textContent = state.session?.id || '';
   showView('view-lockdown');
   clearInterval(state.timerInterval);
+  stopWebcamProctoring();
+  stopMicProctoring();
   window.electronAPI.stopProtection?.();
 }
 
@@ -175,6 +228,9 @@ function connectSocket(backendUrl) {
 }
 
 function initSocket(backendUrl) {
+  if (socket) {
+    try { socket.disconnect(); } catch (e) {}
+  }
   socket = io(`${backendUrl}/exam`, {
     path: '/ws',
     auth: { token: state.token },
@@ -183,7 +239,7 @@ function initSocket(backendUrl) {
   socket.on('connect', () => { state.socketConnected = true; });
   socket.on('disconnect', () => { state.socketConnected = false; });
   socket.on('session:started', () => {});
-  socket.on('server:command', (cmd) => window.electronAPI.onServerCommand(cmd));
+  socket.on('server:command', (cmd) => handleServerCommand(cmd));
 }
 
 function emitSocketEvent(event) {
@@ -197,6 +253,142 @@ function emitSocketEvent(event) {
   }
 }
 
+let webcamStream = null;
+let webcamInterval = null;
+
+async function startWebcamProctoring() {
+  try {
+    let video = document.getElementById('student-webcam-preview');
+    if (!video) {
+      video = document.createElement('video');
+      video.autoplay = true;
+      video.playsInline = true;
+      video.muted = true;
+      video.style.display = 'none';
+      document.body.appendChild(video);
+    }
+
+    const canvas = document.createElement('canvas');
+    canvas.width = 160;
+    canvas.height = 120;
+    canvas.style.display = 'none';
+    document.body.appendChild(canvas);
+
+    webcamStream = await navigator.mediaDevices.getUserMedia({
+      video: { width: 160, height: 120 }
+    });
+    video.srcObject = webcamStream;
+
+    // Send a frame every 10 seconds
+    webcamInterval = setInterval(() => {
+      if (socket && state.socketConnected && state.session) {
+        const ctx = canvas.getContext('2d');
+        if (ctx && video.readyState === video.HAVE_ENOUGH_DATA) {
+          ctx.drawImage(video, 0, 0, canvas.width, canvas.height);
+          const dataUrl = canvas.toDataURL('image/jpeg', 0.5);
+          socket.emit('student:webcam', {
+            sessionId: state.session.id,
+            image: dataUrl,
+          });
+        }
+      }
+    }, 10000);
+
+    console.log('[Webcam] Proctoring camera stream initiated and bound to self preview.');
+  } catch (err) {
+    console.error('[Webcam] Failed to access webcam:', err);
+    queueTelemetry({
+      type: 'webcam_error',
+      severity: 'MEDIUM',
+      timestamp: new Date().toISOString(),
+      payload: { error: err.message }
+    });
+  }
+}
+
+function stopWebcamProctoring() {
+  if (webcamInterval) {
+    clearInterval(webcamInterval);
+    webcamInterval = null;
+  }
+  const video = document.getElementById('student-webcam-preview');
+  if (video) {
+    video.srcObject = null;
+  }
+  if (webcamStream) {
+    webcamStream.getTracks().forEach(track => track.stop());
+    webcamStream = null;
+  }
+  console.log('[Webcam] Stream stopped.');
+}
+
+let audioStream = null;
+let audioContext = null;
+let audioAnalyser = null;
+let micLevelInterval = null;
+
+async function startMicProctoring() {
+  try {
+    audioStream = await navigator.mediaDevices.getUserMedia({ audio: true });
+    
+    const AudioContextClass = window.AudioContext || window.webkitAudioContext;
+    audioContext = new AudioContextClass();
+    const source = audioContext.createMediaStreamSource(audioStream);
+    audioAnalyser = audioContext.createAnalyser();
+    audioAnalyser.fftSize = 64;
+    source.connect(audioAnalyser);
+    
+    const bufferLength = audioAnalyser.frequencyBinCount;
+    const dataArray = new Uint8Array(bufferLength);
+    
+    micLevelInterval = setInterval(() => {
+      if (audioAnalyser && socket && state.socketConnected && state.session) {
+        audioAnalyser.getByteFrequencyData(dataArray);
+        let sum = 0;
+        for (let i = 0; i < bufferLength; i++) {
+          sum += dataArray[i];
+        }
+        const average = sum / bufferLength;
+        const volumeLevel = Math.round((average / 255) * 100);
+        
+        socket.emit('student:mic-level', {
+          sessionId: state.session.id,
+          volume: volumeLevel
+        });
+        
+        if (volumeLevel > 35) {
+          queueTelemetry({
+            type: 'high_noise_detected',
+            severity: 'LOW',
+            timestamp: new Date().toISOString(),
+            payload: { volume: volumeLevel }
+          });
+        }
+      }
+    }, 3000);
+    
+    console.log('[Mic] Proctoring microphone stream initiated.');
+  } catch (err) {
+    console.warn('[Mic] Failed to access microphone:', err.message);
+  }
+}
+
+function stopMicProctoring() {
+  if (micLevelInterval) {
+    clearInterval(micLevelInterval);
+    micLevelInterval = null;
+  }
+  if (audioContext) {
+    try { audioContext.close(); } catch (e) {}
+    audioContext = null;
+  }
+  if (audioStream) {
+    audioStream.getTracks().forEach(track => track.stop());
+    audioStream = null;
+  }
+  console.log('[Mic] Stream stopped.');
+}
+
 // === Auth ===
 let backendUrl = 'http://localhost:3001';
 window.electronAPI.getBackendUrl().then(url => {
@@ -204,32 +396,86 @@ window.electronAPI.getBackendUrl().then(url => {
   connectSocket(url);
 });
 
-document.getElementById('btn-google-login').addEventListener('click', async () => {
-  console.log('Login button clicked. Attempting to fetch from:', backendUrl);
+document.getElementById('btn-verify-code').addEventListener('click', async () => {
+  const codeInput = document.getElementById('inp-access-code');
+  const code = codeInput ? codeInput.value.trim().toUpperCase() : '';
+  const errorEl = document.getElementById('login-error');
+
+  if (!code) {
+    if (errorEl) {
+      errorEl.textContent = 'Please enter an access code';
+      errorEl.classList.remove('hidden');
+    }
+    return;
+  }
+
+  console.log('Verifying exam access code:', code, 'with backend:', backendUrl);
   try {
-    const res = await fetch(`${backendUrl}/api/auth/google`, {
-      method: 'POST', headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ id_token: 'demo-student-token' }),
+    const res = await fetch(`${backendUrl}/api/sessions/validate-code`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ entryCode: code }),
     });
-    console.log('Fetch response status:', res.status);
+
+    console.log('Verification response status:', res.status);
     if (!res.ok) {
       const err = await res.json();
-      console.error('Login error parsed:', err);
-      document.getElementById('login-error').textContent = err.error || 'Login failed';
-      document.getElementById('login-error').className = 'alert alert-error';
+      console.error('Verification failed:', err);
+      if (errorEl) {
+        errorEl.textContent = err.error || 'Invalid or expired access key';
+        errorEl.className = 'alert alert-error';
+        errorEl.classList.remove('hidden');
+      }
       return;
     }
+
     const data = await res.json();
-    console.log('Successful login data size:', Object.keys(data));
+    console.log('Exam verified! Starting session:', data.sessionId);
+    
+    // Save state
     state.token = data.token;
     state.user = data.user;
-    document.getElementById('user-name').textContent = data.user.name;
-    showView('view-exams');
-    loadExams();
+    state.session = { id: data.sessionId, token: data.sessionToken };
+    state.examConfig = data.examConfig;
+    state.remainingSeconds = (data.duration || 90) * 60;
+    state.answers = {};
+    state.currentQuestion = 0;
+    state.examStarted = true;
+
+    // Start native daemon proctoring
+    window.electronAPI.startProtection(data.sessionToken);
+
+    // Auto-Fullscreen (Try both HTML5 API and Electron IPC)
+    try {
+      document.documentElement.requestFullscreen?.();
+    } catch (err) {
+      console.warn('HTML5 requestFullscreen failed:', err);
+    }
+    window.electronAPI.requestFullscreen?.();
+
+    // Dynamically connect Socket.IO and join session
+    connectSocket(backendUrl);
+
+    // Give socket a tiny moment to connect before joining
+    setTimeout(() => {
+      socket?.emit('student:join', { sessionId: data.sessionId });
+    }, 800);
+
+    // Render exam page
+    document.getElementById('exam-title-header').textContent = 'Exam in Progress';
+    showView('view-exam');
+    renderExam();
+    startTimer();
+    startWebcamProctoring();
+    startMicProctoring();
+
   } catch (err) {
-    console.error('CRITICAL LOGIN EXCEPTION:', err);
-    document.getElementById('login-error').textContent = 'Network error: ' + err.message;
-    document.getElementById('login-error').className = 'alert alert-error';
+    console.error('CRITICAL CODE VERIFICATION EXCEPTION:', err);
+    if (errorEl) {
+      errorEl.textContent = 'Connection error: ' + err.message;
+      errorEl.className = 'alert alert-error';
+      errorEl.classList.remove('hidden');
+    }
   }
 });
 
@@ -273,6 +519,7 @@ async function startExam(examId) {
   state.remainingSeconds = (data.duration || 90) * 60;
   state.answers = {};
   state.currentQuestion = 0;
+  state.examStarted = true;
 
   // Start daemon protection
   window.electronAPI.startProtection(data.sessionToken);
@@ -352,6 +599,7 @@ function renderExam() {
 function startTimer() {
   clearInterval(state.timerInterval);
   state.timerInterval = setInterval(() => {
+    if (state.paused) return; // Freeze timer!
     state.remainingSeconds--;
     const el = document.getElementById('timer');
     if (el) {
@@ -364,6 +612,8 @@ function startTimer() {
 
 async function submitExam(reason) {
   clearInterval(state.timerInterval);
+  stopWebcamProctoring();
+  stopMicProctoring();
   flushTelemetry();
   window.electronAPI.stopProtection();
   await fetch(`${backendUrl}/api/sessions/${state.session.id}/status`, {
@@ -403,3 +653,16 @@ if (exitLockdownBtn) {
     }
   });
 }
+
+const exitLoginBtn = document.getElementById('btn-exit-login');
+if (exitLoginBtn) {
+  exitLoginBtn.addEventListener('click', () => {
+    console.log('Exit login button clicked');
+    if (window.electronAPI && window.electronAPI.closeApp) {
+      window.electronAPI.closeApp();
+    } else {
+      console.error('electronAPI.closeApp not found');
+    }
+  });
+}
+

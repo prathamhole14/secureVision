@@ -17,15 +17,18 @@ datasource db {
 
 model User {
   id        String   @id @default(uuid())
-  googleId  String   @unique @map("google_id")
+  googleId  String?  @unique @map("google_id")
+  password  String?
   name      String
   email     String   @unique
   role      String   @default("STUDENT")
   createdAt DateTime @default(now()) @map("created_at")
   updatedAt DateTime @updatedAt @map("updated_at")
 
-  exams    Exam[]
-  sessions Session[]
+  exams              Exam[]
+  sessions           Session[]
+  createdClassrooms  Classroom[]        @relation("TeacherClassrooms")
+  enrolledClassrooms ClassroomStudent[]
 
   @@map("users")
 }
@@ -41,8 +44,9 @@ model Exam {
   createdAt  DateTime  @default(now()) @map("created_at")
   updatedAt  DateTime  @updatedAt @map("updated_at")
 
-  owner    User      @relation(fields: [ownerId], references: [id])
-  sessions Session[]
+  owner      User            @relation(fields: [ownerId], references: [id])
+  sessions   Session[]
+  classrooms ClassroomExam[]
 
   @@map("exams")
 }
@@ -52,14 +56,17 @@ model Session {
   examId            String    @map("exam_id")
   userId            String    @map("user_id")
   sessionToken      String    @unique @map("session_token")
+  entryCode         String?   @unique @map("entry_code")
   startedAt         DateTime? @map("started_at")
   endedAt           DateTime? @map("ended_at")
   status            String    @default("PENDING")
   daemonAttestation String?   @map("daemon_attestation")
+  classroomId       String?   @map("classroom_id")
   createdAt         DateTime  @default(now()) @map("created_at")
 
   exam      Exam       @relation(fields: [examId], references: [id])
   user      User       @relation(fields: [userId], references: [id])
+  classroom Classroom? @relation(fields: [classroomId], references: [id])
   events    Event[]
   artifacts Artifact[]
   flags     Flag[]
@@ -112,3 +119,43 @@ model Flag {
 
   @@map("flags")
 }
+
+model Classroom {
+  id        String   @id @default(uuid())
+  name      String
+  code      String   @unique
+  teacherId String   @map("teacher_id")
+  createdAt DateTime @default(now()) @map("created_at")
+
+  teacher   User               @relation("TeacherClassrooms", fields: [teacherId], references: [id])
+  students  ClassroomStudent[]
+  exams     ClassroomExam[]
+  sessions  Session[]
+
+  @@map("classrooms")
+}
+
+model ClassroomStudent {
+  classroomId String   @map("classroom_id")
+  studentId   String   @map("student_id")
+  joinedAt    DateTime @default(now()) @map("joined_at")
+
+  classroom   Classroom @relation(fields: [classroomId], references: [id], onDelete: Cascade)
+  student     User      @relation(fields: [studentId], references: [id], onDelete: Cascade)
+
+  @@id([classroomId, studentId])
+  @@map("classroom_students")
+}
+
+model ClassroomExam {
+  classroomId String   @map("classroom_id")
+  examId      String   @map("exam_id")
+  assignedAt  DateTime @default(now()) @map("assigned_at")
+
+  classroom   Classroom @relation(fields: [classroomId], references: [id], onDelete: Cascade)
+  exam        Exam      @relation(fields: [examId], references: [id], onDelete: Cascade)
+
+  @@id([classroomId, examId])
+  @@map("classroom_exams")
+}
+

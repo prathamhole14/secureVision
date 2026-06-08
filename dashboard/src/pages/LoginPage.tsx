@@ -4,27 +4,70 @@ import api from '../lib/api';
 
 export default function LoginPage() {
   const { loginWithToken } = useAuth();
+  const [isSignUp, setIsSignUp] = useState(false);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState('');
 
+  // Form fields
+  const [name, setName] = useState('');
+  const [email, setEmail] = useState('');
+  const [password, setPassword] = useState('');
+  const [role, setRole] = useState<'STUDENT' | 'PROFESSOR'>('STUDENT');
 
+  async function handleSubmit(e: React.FormEvent) {
+    e.preventDefault();
+    if (!email || !password || (isSignUp && !name)) {
+      setError('Please fill in all fields.');
+      return;
+    }
 
-  // In a real app, Google Sign-In SDK would call this with a real id_token.
-  // Here we simulate it for demo purposes only.
-  async function handleDemoLogin() {
     setLoading(true);
     setError('');
+
     try {
-      // For demo: call a special dev endpoint that creates/returns a professor token
-      // This bypasses Google OAuth for local development
-      const res = await api.post('/auth/google', {
-        id_token: 'demo-professor-token',
-      });
-      loginWithToken(res.data.token, res.data.user);
-      // HARD REDIRECT: Bypass React Router entirely to break out of Vite cache
+      if (isSignUp) {
+        // Register
+        const res = await api.post('/auth/register', {
+          name,
+          email,
+          password,
+          role,
+        });
+        loginWithToken(res.data.token, res.data.user);
+      } else {
+        // Login
+        const res = await api.post('/auth/login', {
+          email,
+          password,
+        });
+        loginWithToken(res.data.token, res.data.user);
+      }
+      
+      // Hard redirect to clear cache and load portal matching role
       window.location.href = '/';
     } catch (e: any) {
-      setError(e.response?.data?.error || 'Login failed. Is the backend running?');
+      setError(e.response?.data?.error || 'Authentication failed. Please check your credentials.');
+    } finally {
+      setLoading(false);
+    }
+  }
+
+  // Fallback demo logins to make local development super convenient
+  async function handleDemoLogin(roleType: 'STUDENT' | 'PROFESSOR') {
+    setLoading(true);
+    setError('');
+    const demoTokenMap = {
+      STUDENT: 'demo-student-token',
+      PROFESSOR: 'demo-professor-token',
+    };
+    try {
+      const res = await api.post('/auth/google', {
+        id_token: demoTokenMap[roleType],
+      });
+      loginWithToken(res.data.token, res.data.user);
+      window.location.href = '/';
+    } catch (e: any) {
+      setError(e.response?.data?.error || 'Demo login failed. Is the backend running?');
     } finally {
       setLoading(false);
     }
@@ -32,36 +75,131 @@ export default function LoginPage() {
 
   return (
     <div className="login-page">
-      <div className="login-card">
-        <div className="logo-icon">🛡️</div>
-        <h1>secureVision</h1>
-        <p>Secure examination platform for institutions. Sign in to access your professor dashboard.</p>
+      <div className="login-card" style={{ maxWidth: '440px', padding: '40px 32px' }}>
+        <div className="logo-icon" style={{ fontSize: '3.5rem', marginBottom: '8px' }}>🛡️</div>
+        <h1 style={{ marginBottom: '4px', letterSpacing: '-0.02em' }}>secureVision</h1>
+        <p style={{ fontSize: '0.9rem', marginBottom: '24px', color: 'var(--text-secondary)' }}>
+          {isSignUp 
+            ? 'Create a secure account for your institution' 
+            : 'Secure examination portal for educational institutions'}
+        </p>
 
         {error && (
-          <div className="alert alert-high" style={{ textAlign: 'left' }}>
+          <div className="alert alert-high" style={{ textAlign: 'left', fontSize: '0.85rem', marginBottom: '16px' }}>
             {error}
           </div>
         )}
 
-        <button className="google-btn" onClick={handleDemoLogin} disabled={loading}>
-          {loading ? (
-            <span className="spinner" />
-          ) : (
-            <>
-              <svg width="20" height="20" viewBox="0 0 24 24">
-                <path fill="#4285F4" d="M22.56 12.25c0-.78-.07-1.53-.2-2.25H12v4.26h5.92c-.26 1.37-1.04 2.53-2.21 3.31v2.77h3.57c2.08-1.92 3.28-4.74 3.28-8.09z"/>
-                <path fill="#34A853" d="M12 23c2.97 0 5.46-.98 7.28-2.66l-3.57-2.77c-.98.66-2.23 1.06-3.71 1.06-2.86 0-5.29-1.93-6.16-4.53H2.18v2.84C3.99 20.53 7.7 23 12 23z"/>
-                <path fill="#FBBC05" d="M5.84 14.09c-.22-.66-.35-1.36-.35-2.09s.13-1.43.35-2.09V7.07H2.18C1.43 8.55 1 10.22 1 12s.43 3.45 1.18 4.93l2.85-2.22.81-.62z"/>
-                <path fill="#EA4335" d="M12 5.38c1.62 0 3.06.56 4.21 1.64l3.15-3.15C17.45 2.09 14.97 1 12 1 7.7 1 3.99 3.47 2.18 7.07l3.66 2.84c.87-2.6 3.3-4.53 6.16-4.53z"/>
-              </svg>
-              Sign in with Google
-            </>
+        <form onSubmit={handleSubmit} style={{ textAlign: 'left' }}>
+          {isSignUp && (
+            <div className="form-group">
+              <label className="form-label">Full Name</label>
+              <input 
+                type="text" 
+                className="form-input" 
+                placeholder="Enter your full name" 
+                value={name} 
+                onChange={(e) => setName(e.target.value)} 
+                required 
+              />
+            </div>
           )}
-        </button>
 
-        <p style={{ marginTop: 20, fontSize: '0.75rem', color: 'var(--text-muted)' }}>
-          🔒 Google OAuth — only institutional accounts are authorized.
-        </p>
+          <div className="form-group">
+            <label className="form-label">Email Address</label>
+            <input 
+              type="email" 
+              className="form-input" 
+              placeholder="e.g. name@university.edu" 
+              value={email} 
+              onChange={(e) => setEmail(e.target.value)} 
+              required 
+            />
+          </div>
+
+          <div className="form-group" style={{ marginBottom: isSignUp ? '20px' : '28px' }}>
+            <label className="form-label">Password</label>
+            <input 
+              type="password" 
+              className="form-input" 
+              placeholder="Min. 6 characters" 
+              value={password} 
+              onChange={(e) => setPassword(e.target.value)} 
+              required 
+            />
+          </div>
+
+          {isSignUp && (
+            <div className="form-group" style={{ marginBottom: '28px' }}>
+              <label className="form-label">Select Account Type</label>
+              <div style={{ display: 'flex', gap: '8px' }}>
+                <button
+                  type="button"
+                  className={`btn ${role === 'STUDENT' ? 'btn-primary' : 'btn-outline'}`}
+                  style={{ flex: 1, justifyContent: 'center' }}
+                  onClick={() => setRole('STUDENT')}
+                >
+                  👨‍🎓 Student
+                </button>
+                <button
+                  type="button"
+                  className={`btn ${role === 'PROFESSOR' ? 'btn-primary' : 'btn-outline'}`}
+                  style={{ flex: 1, justifyContent: 'center' }}
+                  onClick={() => setRole('PROFESSOR')}
+                >
+                  👩‍🏫 Professor
+                </button>
+              </div>
+            </div>
+          )}
+
+          <button 
+            type="submit" 
+            className="btn btn-primary" 
+            style={{ width: '100%', justifyContent: 'center', padding: '12px', fontSize: '0.95rem' }} 
+            disabled={loading}
+          >
+            {loading ? <span className="spinner" /> : (isSignUp ? 'Sign Up' : 'Sign In')}
+          </button>
+        </form>
+
+        <div style={{ marginTop: '20px', fontSize: '0.85rem' }}>
+          <span style={{ color: 'var(--text-secondary)' }}>
+            {isSignUp ? 'Already have an account? ' : "Don't have an account yet? "}
+          </span>
+          <button 
+            type="button" 
+            style={{ background: 'none', border: 'none', color: 'var(--accent)', fontWeight: '600', cursor: 'pointer', textDecoration: 'underline' }}
+            onClick={() => { setIsSignUp(!isSignUp); setError(''); }}
+          >
+            {isSignUp ? 'Sign In' : 'Sign Up'}
+          </button>
+        </div>
+
+        {/* Demo login bypass fallback */}
+        <div style={{ marginTop: '24px', borderTop: '1px solid var(--border)', paddingTop: '20px' }}>
+          <p style={{ fontSize: '0.75rem', color: 'var(--text-secondary)', marginBottom: '12px' }}>
+            ⚡ Fast Developer Demo Entry:
+          </p>
+          <div style={{ display: 'flex', gap: '8px' }}>
+            <button 
+              type="button" 
+              className="btn btn-outline btn-sm" 
+              style={{ flex: 1, justifyContent: 'center', fontSize: '0.75rem', padding: '6px' }}
+              onClick={() => handleDemoLogin('STUDENT')}
+            >
+              Demo Student
+            </button>
+            <button 
+              type="button" 
+              className="btn btn-outline btn-sm" 
+              style={{ flex: 1, justifyContent: 'center', fontSize: '0.75rem', padding: '6px' }}
+              onClick={() => handleDemoLogin('PROFESSOR')}
+            >
+              Demo Professor
+            </button>
+          </div>
+        </div>
       </div>
     </div>
   );
